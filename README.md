@@ -30,7 +30,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "itechsmart": {
       "command": "npx",
-      "args": ["-y", "@iteksmart/mcp-server"],
+      "args": ["-y", "@itechsmart/mcp-server"],
       "env": {
         "ITECHSMART_API_KEY": "your-api-key-here"
       }

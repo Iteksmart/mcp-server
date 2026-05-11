@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * iTechSmart MCP Server
  * Exposes ProofLink verification and UAIO operations as MCP tools
@@ -138,7 +139,7 @@ async function fetchFromAPI<T>(endpoint: string): Promise<T> {
   if (!response.ok) {
     throw new McpError(ErrorCode.InternalError, `API error: ${response.status} ${response.statusText}`)
   }
-  return response.json()
+  return response.json() as Promise<T>
 }
 
 // ─────────────────────────────────────────────
