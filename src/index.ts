@@ -17,6 +17,7 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js'
 import {
   CallToolRequestSchema,
   ErrorCode,
@@ -24,6 +25,7 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js'
 import crypto from 'crypto'
+import http from 'http'
 
 // ─────────────────────────────────────────────
 // Types
@@ -149,7 +151,7 @@ async function fetchFromAPI<T>(endpoint: string): Promise<T> {
 const server = new Server(
   {
     name: 'itechsmart-uaio',
-    version: '1.0.0',
+    version: '1.1.0',
   },
   {
     capabilities: {
@@ -644,11 +646,77 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // Start Server
 // ─────────────────────────────────────────────
 
-async function main() {
+async function startStdio() {
   const transport = new StdioServerTransport()
   await server.connect(transport)
-  console.error('iTechSmart MCP Server running — mcp.itechsmart.dev')
+  console.error('iTechSmart MCP Server running [stdio] — mcp.itechsmart.dev')
   console.error('Tools: verify_prooflink_receipt | get_receipt_chain | query_uaio_status | get_incident_details | list_recent_incidents | simulate_infrastructure_attack')
+}
+
+async function startHttp() {
+  const port = parseInt(process.env.PORT || '3200', 10)
+  let sseTransport: SSEServerTransport | null = null
+
+  const httpServer = http.createServer(async (req, res) => {
+    try {
+      const reqUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+
+      if (req.method === 'GET' && reqUrl.pathname === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          status: 'ok',
+          service: 'itechsmart-mcp',
+          version: '1.1.0',
+          transport: 'http+sse',
+          tools: 6,
+          sse_connected: sseTransport !== null,
+          timestamp: new Date().toISOString(),
+        }))
+        return
+      }
+
+      if (req.method === 'GET' && reqUrl.pathname === '/sse') {
+        sseTransport = new SSEServerTransport('/messages', res)
+        res.on('close', () => { sseTransport = null })
+        await server.connect(sseTransport)
+        return
+      }
+
+      if (req.method === 'POST' && reqUrl.pathname === '/messages') {
+        if (!sseTransport) {
+          res.writeHead(400, { 'Content-Type': 'text/plain' })
+          res.end('No active SSE session. GET /sse first to establish.')
+          return
+        }
+        await sseTransport.handlePostMessage(req, res)
+        return
+      }
+
+      res.writeHead(404, { 'Content-Type': 'text/plain' })
+      res.end('Not found')
+    } catch (err) {
+      console.error('HTTP handler error:', err)
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'text/plain' })
+        res.end('Internal server error')
+      }
+    }
+  })
+
+  httpServer.listen(port, () => {
+    console.error(`iTechSmart MCP Server running [http+sse] on :${port}`)
+    console.error('Endpoints: GET /health  |  GET /sse  |  POST /messages')
+    console.error('Note: v1.1.0 supports a single concurrent SSE session.')
+  })
+}
+
+async function main() {
+  const useHttp = (process.env.MCP_TRANSPORT || '').toLowerCase() === 'http'
+  if (useHttp) {
+    await startHttp()
+  } else {
+    await startStdio()
+  }
 }
 
 main().catch(console.error)
