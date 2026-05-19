@@ -39,7 +39,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-Get your API key: [itechsmart.dev/api-keys](https://itechsmart.dev/api-keys)
+Get your API key: contact [enterprise@itechsmart.dev](mailto:enterprise@itechsmart.dev) or [itechsmart.dev/contact](https://itechsmart.dev/contact)
 
 ### Remote MCP (SSE)
 
@@ -166,7 +166,7 @@ and generate a compliance report for our SOC 2 audit."
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `ITECHSMART_API_KEY` | Yes | API key from itechsmart.dev/api-keys |
+| `ITECHSMART_API_KEY` | Yes | API key — contact enterprise@itechsmart.dev or itechsmart.dev/contact |
 | `ITECHSMART_API_URL` | No | Custom API URL (default: https://app.itechsmart.dev/api/v1) |
 
 ---
