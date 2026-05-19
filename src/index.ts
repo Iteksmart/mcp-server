@@ -32,6 +32,7 @@ import {
 import crypto from 'crypto'
 import * as fs from 'fs'
 import http from 'http'
+import { execSync } from 'child_process'
 
 // ─────────────────────────────────────────────
 // SECURITY CONFIG (Phase 1)
@@ -73,6 +74,127 @@ const TOOL_ALIASES: Record<string, string> = {
   classify_incident: 'get_incident_details',
   simulate_blast_radius: 'simulate_infrastructure_attack',
 }
+
+// ─────────────────────────────────────────────
+// CANONICAL LEDGER (Sprint-003 — real data sources)
+// ─────────────────────────────────────────────
+
+const CANONICAL_LEDGER_PATH = process.env.CANONICAL_LEDGER_PATH
+  || '/opt/itechsmart/audit_ledger/ledger.json'
+
+const BREAK_IT_API_URL = process.env.BREAK_IT_API_URL
+  || 'http://localhost:8765/api/attack'
+
+const SYSTEM_CONTEXT_PATH = '/home/ubuntu/octoai-dev-agent/system_context.json'
+
+interface LedgerEntry {
+  id: string
+  hash_sha256: string
+  prev_hash: string | null
+  timestamp: string
+  category: string
+  actor: string
+  subject: string
+  action: string
+  outcome: string
+  details: unknown
+  verify_url?: string
+  tamper_detected?: boolean
+}
+
+function readCanonicalLedger(): LedgerEntry[] {
+  // Always read fresh — the ledger is small (~200KB at ~250 entries) and
+  // we want to see new writes from break-it / health monitor as they happen.
+  try {
+    const raw = fs.readFileSync(CANONICAL_LEDGER_PATH, 'utf8')
+    const parsed = JSON.parse(raw)
+    const entries = Array.isArray(parsed) ? parsed
+      : Array.isArray(parsed?.entries) ? parsed.entries
+      : Array.isArray(parsed?.receipts) ? parsed.receipts
+      : []
+    return entries as LedgerEntry[]
+  } catch (e) {
+    console.error('[ledger] read failed:', e instanceof Error ? e.message : String(e))
+    return []
+  }
+}
+
+// Python-faithful JSON string escaping. Matches python json.dumps's default
+// `ensure_ascii=True` behavior: control chars and any code point ≥ 0x80 are
+// `\uXXXX`-escaped. JS's JSON.stringify outputs non-ASCII as UTF-8 by default,
+// which would mismatch hashes for any entry containing characters like `—`
+// (U+2014, em-dash) or `✓` (U+2713) — both common in our ledger entries.
+function pythonJsonString(s: string): string {
+  let out = '"'
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c === 0x22) out += '\\"'
+    else if (c === 0x5c) out += '\\\\'
+    else if (c === 0x08) out += '\\b'
+    else if (c === 0x09) out += '\\t'
+    else if (c === 0x0a) out += '\\n'
+    else if (c === 0x0c) out += '\\f'
+    else if (c === 0x0d) out += '\\r'
+    else if (c < 0x20 || c >= 0x7f) {
+      out += '\\u' + c.toString(16).padStart(4, '0')
+    }
+    else out += s[i]
+  }
+  return out + '"'
+}
+
+// JSON canonicalization matching python's json.dumps(sort_keys=True, separators=(",",":"))
+function canonicalize(value: unknown): string {
+  if (value === null || value === undefined) return 'null'
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return 'null'
+    return JSON.stringify(value)
+  }
+  if (typeof value === 'string') return pythonJsonString(value)
+  if (typeof value === 'boolean') return value ? 'true' : 'false'
+  if (Array.isArray(value)) {
+    return '[' + value.map(canonicalize).join(',') + ']'
+  }
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    const keys = Object.keys(obj).sort()
+    return '{' + keys.map(k => pythonJsonString(k) + ':' + canonicalize(obj[k])).join(',') + '}'
+  }
+  return 'null'
+}
+
+// Mirror /opt/itechsmart/audit_ledger/append.py:
+//   canonical = json.dumps(entry, sort_keys=True, separators=(",",":"))
+//   h = hashlib.sha256(canonical).hexdigest()
+// where `entry` is the payload BEFORE id, hash_sha256, prev_hash, and
+// recomputed/recomputed_at fields are added.
+function computeCanonicalHash(entry: LedgerEntry): string {
+  const payload: Record<string, unknown> = {
+    timestamp: entry.timestamp,
+    category: entry.category,
+    actor: entry.actor,
+    subject: entry.subject,
+    action: entry.action,
+    outcome: entry.outcome,
+    details: entry.details,
+    verify_url: entry.verify_url ?? '',
+    tamper_detected: entry.tamper_detected ?? false,
+  }
+  return crypto.createHash('sha256').update(canonicalize(payload), 'utf8').digest('hex')
+}
+
+// Categories that represent operational/incident entries in the ledger
+// (used by list_recent_incidents). Excludes audit-of-audit categories
+// like 'audit_test' and the MCP self-report categories themselves.
+const INCIDENT_CATEGORIES = new Set([
+  'self_healing',
+  'platform_fix',
+  'wazuh_alert',
+  'platform_health_check',
+  'platform_finding',
+  'windows_remediation',
+  'security_audit',
+])
 
 // ─────────────────────────────────────────────
 // AUTH HELPERS
@@ -369,220 +491,383 @@ async function dispatchTool(name: string, args: unknown): Promise<unknown> {
   switch (canonical) {
 
     case 'verify_prooflink_receipt': {
-      const receipt_id = String(safeArgs.receipt_id || '')
-      let receipt: ProofLinkReceipt
-      let previousReceipt: ProofLinkReceipt | null = null
-      const LEDGER = '/home/ubuntu/octoai-dev-agent/ledger.json'
-      try {
-        if (fs.existsSync(LEDGER)) {
-          const ledger = JSON.parse(fs.readFileSync(LEDGER, 'utf8')) as ProofLinkReceipt[]
-          const found = ledger.find(r => r.receipt_id === receipt_id)
-          if (found) {
-            receipt = found
-            if (found.chain_position > 0) {
-              previousReceipt = ledger.find(r => r.chain_position === found.chain_position - 1) || null
-            }
-          } else { throw new Error('receipt not in local ledger') }
-        } else { throw new Error('local ledger missing') }
-      } catch {
-        const demoBase = {
-          receipt_id, version: '1.0', timestamp: new Date().toISOString(),
-          container: 'suite-api-demo', executor: 'OctoAI/Nemotron-Ultra-253B/v1.0',
-          trigger: 'Demo verification request', action: 'No action — verification only',
-          action_parameters: {},
-          before_state: { snapshot_hash: 'demo', healthy: true, metrics: {} },
-          after_state: { snapshot_hash: 'demo', healthy: true, metrics: {} },
-          nist_controls: ['AU-2'], human_input: 'ZERO' as const,
-          arbiter_policy: 'auto-remediation-v2',
-          previous_hash: null, chain_position: 0,
+      const receipt_id = String(safeArgs.receipt_id || '').trim()
+      if (!receipt_id) {
+        return {
+          content: [{
+            type: 'text', text: JSON.stringify({
+              found: false, verification_result: 'INVALID INPUT',
+              error: 'receipt_id is required',
+            }, null, 2),
+          }],
         }
-        receipt = { ...demoBase, sha256: computeReceiptHash(demoBase) }
       }
-      const result = verifyReceipt(receipt, previousReceipt)
+
+      const entries = readCanonicalLedger()
+      // Match by 16-char id (canonical form), full sha256, OR prefix of either.
+      const entry = entries.find(e =>
+        e.id === receipt_id
+        || e.hash_sha256 === receipt_id
+        || (e.id && e.id.startsWith(receipt_id))
+        || (e.hash_sha256 && e.hash_sha256.startsWith(receipt_id)),
+      )
+
+      if (!entry) {
+        return {
+          content: [{
+            type: 'text', text: JSON.stringify({
+              found: false,
+              verification_result: 'RECEIPT NOT FOUND',
+              receipt_id,
+              message: 'No matching entry in canonical ProofLink ledger',
+              ledger_path: CANONICAL_LEDGER_PATH,
+              ledger_entries: entries.length,
+              scope: 'prooflink:verify:read',
+            }, null, 2),
+          }],
+        }
+      }
+
+      // Real hash integrity check — recompute and compare.
+      const recomputed = computeCanonicalHash(entry)
+      const hashValid = recomputed === entry.hash_sha256
+
+      // Chain link check. The canonical ledger stores entries newest-first
+      // (append.py inserts at index 0), so the "previous in time" entry is
+      // at idx+1.
+      const idx = entries.indexOf(entry)
+      const prevEntry = idx >= 0 && idx + 1 < entries.length ? entries[idx + 1] : null
+      const expectedPrevHash = prevEntry ? prevEntry.hash_sha256 : null
+      const chainValid = (entry.prev_hash ?? null) === expectedPrevHash
+
+      const valid = hashValid && chainValid
       return {
         content: [{
           type: 'text', text: JSON.stringify({
-            receipt_id,
-            verification_result: result.valid ? 'VERIFIED ✓' : 'TAMPER DETECTED ✗',
-            tamper_detected: result.tamper_detected,
-            chain_position: receipt.chain_position,
-            timestamp: receipt.timestamp,
-            container: receipt.container,
-            action: receipt.action,
-            human_input: receipt.human_input,
-            nist_controls: receipt.nist_controls,
-            checks: result.checks,
-            errors: result.errors,
-            verify_url: `https://verify.itechsmart.dev/${receipt_id}`,
-            sha256: receipt.sha256,
-            scope: TOOL_SCOPES[name] || TOOL_SCOPES[canonical],
+            found: true,
+            receipt_id: entry.id,
+            verification_result: valid ? 'VERIFIED ✓' : 'TAMPER DETECTED ✗',
+            tamper_detected: !valid,
+            checks: [
+              {
+                name: 'receipt_integrity',
+                passed: hashValid,
+                detail: hashValid
+                  ? `Hash valid: ${entry.hash_sha256.substring(0, 16)}...`
+                  : `Hash MISMATCH — computed ${recomputed.substring(0, 16)} vs stored ${entry.hash_sha256.substring(0, 16)}`,
+              },
+              {
+                name: 'chain_link',
+                passed: chainValid,
+                detail: chainValid
+                  ? (prevEntry ? `Chain intact: links to ${prevEntry.id.substring(0, 8)}` : 'Oldest entry (no prior)')
+                  : `Chain BROKEN: prev_hash ${entry.prev_hash} ≠ expected ${expectedPrevHash}`,
+              },
+            ],
+            timestamp: entry.timestamp,
+            category: entry.category,
+            actor: entry.actor,
+            subject: entry.subject,
+            action: entry.action,
+            outcome: entry.outcome,
+            sha256: entry.hash_sha256,
+            prev_hash: entry.prev_hash,
+            position_from_newest: idx,
+            ledger_path: CANONICAL_LEDGER_PATH,
+            verify_url: entry.verify_url || `https://verify.itechsmart.dev/${entry.id}`,
+            scope: 'prooflink:verify:read',
           }, null, 2),
         }],
       }
     }
 
     case 'get_receipt_chain': {
-      const limit = typeof safeArgs.limit === 'number' ? safeArgs.limit : 20
-      const container = safeArgs.container ? String(safeArgs.container) : undefined
-      let receipts: ProofLinkReceipt[]
-      try {
-        const endpoint = container
-          ? `/prooflink/receipts?limit=${limit}&container=${container}`
-          : `/prooflink/receipts?limit=${limit}`
-        receipts = await fetchFromAPI<ProofLinkReceipt[]>(endpoint)
-      } catch { receipts = [] }
-      const sorted = [...receipts].sort((a, b) => a.chain_position - b.chain_position)
+      const limit = Math.min(
+        Math.max(typeof safeArgs.limit === 'number' ? safeArgs.limit : 20, 1),
+        100,
+      )
+      const subjectFilter = safeArgs.container ? String(safeArgs.container) : undefined
+
+      const entries = readCanonicalLedger()
+
+      // Chain integrity walk. Entries are newest-first; the prev_hash of
+      // entries[i] should equal the hash_sha256 of entries[i+1].
       let chainBreaks = 0
       const tamperPositions: number[] = []
-      for (let i = 0; i < sorted.length; i++) {
-        const result = verifyReceipt(sorted[i], i > 0 ? sorted[i - 1] : null)
-        if (!result.valid) { chainBreaks++; tamperPositions.push(sorted[i].chain_position) }
+      for (let i = 0; i < entries.length - 1; i++) {
+        const actual = entries[i].prev_hash ?? null
+        const expected = entries[i + 1].hash_sha256
+        if (actual !== expected) {
+          chainBreaks++
+          tamperPositions.push(i)
+        }
       }
+
+      const filtered = subjectFilter
+        ? entries.filter(e => e.subject === subjectFilter || e.actor === subjectFilter)
+        : entries
+      const window = filtered.slice(0, limit)
+
       return {
         content: [{
           type: 'text', text: JSON.stringify({
             chain_summary: {
-              total_receipts: sorted.length,
+              total_receipts: entries.length,
               chain_valid: chainBreaks === 0,
               chain_breaks: chainBreaks,
-              tamper_positions: tamperPositions,
-              first_receipt: sorted[0]?.timestamp,
-              last_receipt: sorted[sorted.length - 1]?.timestamp,
-              status: chainBreaks === 0 ? 'CHAIN INTACT ✓' : `CHAIN BROKEN — ${chainBreaks} position(s) tampered`,
+              tamper_positions: tamperPositions.slice(0, 10),
+              first_receipt: entries[entries.length - 1]?.timestamp ?? null,
+              last_receipt: entries[0]?.timestamp ?? null,
+              status: chainBreaks === 0
+                ? 'CHAIN INTACT ✓'
+                : `CHAIN BROKEN — ${chainBreaks} position(s) tampered`,
             },
-            receipts: sorted.map(r => ({
-              position: r.chain_position,
-              receipt_id: r.receipt_id,
+            filter: subjectFilter ? { subject_or_actor: subjectFilter } : null,
+            showing: window.length,
+            receipts: window.map((r, i) => ({
+              position_from_newest: i,
+              id: r.id,
               timestamp: r.timestamp,
-              container: r.container,
-              action: r.action,
-              human_input: r.human_input,
-              sha256_preview: r.sha256.substring(0, 16) + '...',
+              category: r.category,
+              actor: r.actor,
+              subject: r.subject,
+              action: r.action ? r.action.substring(0, 160) : '',
+              sha256_preview: r.hash_sha256 ? r.hash_sha256.substring(0, 16) + '...' : null,
             })),
+            ledger_path: CANONICAL_LEDGER_PATH,
             verify_url: 'https://verify.itechsmart.dev',
             open_source_verifier: 'https://github.com/Iteksmart/prooflink-verifier',
+            scope: 'ledger:audit:read',
           }, null, 2),
         }],
       }
     }
 
     case 'query_uaio_status': {
-      let status: UAIOStatus
+      // Real container counts via docker ps. The MCP service runs as user
+      // `ubuntu` which is in the docker group, so no sudo needed.
+      let containersTotal = 0
+      let containersHealthy = 0
+      let containersUnhealthy = 0
+      let dockerError: string | null = null
       try {
-        const CTX = '/home/ubuntu/octoai-dev-agent/system_context.json'
-        const LEDGER = '/home/ubuntu/octoai-dev-agent/ledger.json'
-        const ctx = fs.existsSync(CTX) ? JSON.parse(fs.readFileSync(CTX, 'utf8')) : {}
-        const ledger = fs.existsSync(LEDGER) ? JSON.parse(fs.readFileSync(LEDGER, 'utf8')) : []
-        const platform = ctx.platform || {}
-        const nist = parseInt(String(platform.nist_csf || '96/100').split('/')[0]) || 96
-        const hipaa = platform.hipaa === 'compliant'
-          ? 100
-          : parseInt(String(platform.hipaa || '100/100').split('/')[0]) || 100
-        status = {
-          containers_healthy: 131,
-          containers_total: 131,
-          receipts_generated: Array.isArray(ledger) ? ledger.length : (platform.prooflink_receipts || 0),
-          chain_breaks: 0,
-          last_remediation: (Array.isArray(ledger) && ledger.length > 0)
-            ? ledger[ledger.length - 1].timestamp
-            : new Date().toISOString(),
-          last_remediation_ms: 18420,
-          nist_csf_score: nist,
-          hipaa_score: hipaa,
-          platform_status: 'operational',
-        }
-      } catch {
-        status = {
-          containers_healthy: 131, containers_total: 131,
-          receipts_generated: 0, chain_breaks: 0,
-          last_remediation: new Date().toISOString(),
-          last_remediation_ms: 18420,
-          nist_csf_score: 96, hipaa_score: 100,
-          platform_status: 'operational',
-        }
+        containersTotal = parseInt(
+          execSync('docker ps -q | wc -l', { timeout: 5000, encoding: 'utf8' }).toString().trim(),
+        ) || 0
+        containersHealthy = parseInt(
+          execSync('docker ps --filter health=healthy -q | wc -l',
+            { timeout: 5000, encoding: 'utf8' }).toString().trim(),
+        ) || 0
+        containersUnhealthy = parseInt(
+          execSync('docker ps --filter health=unhealthy -q | wc -l',
+            { timeout: 5000, encoding: 'utf8' }).toString().trim(),
+        ) || 0
+      } catch (e) {
+        dockerError = e instanceof Error ? e.message : String(e)
+        console.error('[query_uaio_status] docker exec failed:', dockerError)
       }
+
+      // Real canonical ledger + real chain breaks.
+      const entries = readCanonicalLedger()
+      let chainBreaks = 0
+      for (let i = 0; i < entries.length - 1; i++) {
+        if ((entries[i].prev_hash ?? null) !== entries[i + 1].hash_sha256) chainBreaks++
+      }
+
+      // Real last remediation: most-recent entry with a recovery_time_seconds
+      // in its details. Ledger is newest-first, so iterate from start.
+      const lastWithRecovery = entries.find(e => {
+        const d = (e.details && typeof e.details === 'object') ? e.details as Record<string, unknown> : null
+        return d != null && typeof d.recovery_time_seconds === 'number'
+      })
+      const lastTs = entries[0]?.timestamp ?? null
+      const lastRecoveryMs = lastWithRecovery && (lastWithRecovery.details as Record<string, unknown>).recovery_time_seconds
+        ? Math.round(((lastWithRecovery.details as Record<string, number>).recovery_time_seconds) * 1000)
+        : null
+      const lastHumanIntervention = lastWithRecovery
+        ? Boolean((lastWithRecovery.details as Record<string, unknown>).human_intervention)
+        : null
+
+      // Compliance from system_context.json (real values, not hardcoded).
+      let nist = 96
+      let hipaa = 100
+      try {
+        if (fs.existsSync(SYSTEM_CONTEXT_PATH)) {
+          const ctx = JSON.parse(fs.readFileSync(SYSTEM_CONTEXT_PATH, 'utf8'))
+          const platform = ctx.platform || {}
+          nist = parseInt(String(platform.nist_csf || '96/100').split('/')[0]) || 96
+          hipaa = platform.hipaa === 'compliant'
+            ? 100
+            : parseInt(String(platform.hipaa || '100/100').split('/')[0]) || 100
+        }
+      } catch { /* fall back to defaults */ }
+
+      const operational = dockerError === null
+        && containersTotal > 0
+        && chainBreaks === 0
+        && containersUnhealthy === 0
+
       return {
         content: [{
           type: 'text', text: JSON.stringify({
             platform: 'iTechSmart UAIO — Unified Autonomous IT Operations',
-            status: status.platform_status.toUpperCase(),
+            status: operational ? 'OPERATIONAL' : 'DEGRADED',
             containers: {
-              healthy: status.containers_healthy,
-              total: status.containers_total,
-              health_pct: Math.round((status.containers_healthy / status.containers_total) * 100),
+              healthy: containersHealthy,
+              unhealthy: containersUnhealthy,
+              total: containersTotal,
+              health_pct: containersTotal > 0
+                ? Math.round((containersHealthy / containersTotal) * 100)
+                : 0,
+              source: dockerError ? `error: ${dockerError}` : 'docker ps (live)',
+              note: 'Containers without a HEALTHCHECK defined are counted in `total` but not in `healthy`.',
             },
             prooflink: {
-              receipts_generated: status.receipts_generated,
-              chain_breaks: status.chain_breaks,
-              chain_status: status.chain_breaks === 0 ? 'INTACT ✓' : `${status.chain_breaks} BREAK(S) DETECTED`,
+              receipts_generated: entries.length,
+              chain_breaks: chainBreaks,
+              chain_status: chainBreaks === 0 ? 'INTACT ✓' : `${chainBreaks} BREAK(S) DETECTED`,
+              ledger_path: CANONICAL_LEDGER_PATH,
               public_ledger: 'https://verify.itechsmart.dev',
             },
             last_remediation: {
-              timestamp: status.last_remediation,
-              duration_ms: status.last_remediation_ms,
-              human_input: 'ZERO',
+              timestamp: lastTs,
+              duration_ms: lastRecoveryMs,
+              source_actor: lastWithRecovery?.actor ?? null,
+              source_subject: lastWithRecovery?.subject ?? null,
+              human_input: lastHumanIntervention === false ? 'ZERO'
+                : lastHumanIntervention === true ? 'MANUAL'
+                : 'UNKNOWN',
             },
             compliance: {
-              nist_csf: `${status.nist_csf_score}/100`,
-              hipaa: `${status.hipaa_score}/100`,
+              nist_csf: `${nist}/100`,
+              hipaa: `${hipaa}/100`,
               fedramp: '90/100 (pathway active)',
             },
             powered_by: 'NVIDIA Nemotron Ultra 253B | OctoAI | ProofLink™',
+            scope: 'infrastructure:scan:read',
           }, null, 2),
         }],
       }
     }
 
     case 'get_incident_details': {
-      const incident_id = String(safeArgs.incident_id || '')
-      let incident: Record<string, unknown>
-      try {
-        incident = await fetchFromAPI(`/incidents/${incident_id}`)
-      } catch {
-        incident = {
-          incident_id, timestamp: new Date().toISOString(),
-          trigger: 'OOMKilled — CrashLoopBackOff (restarts: 7)',
-          container: 'suite-api-7d9f8b-xk2p9',
-          detection_ms: 3200, remediation_ms: 18420,
-          action: 'kubectl patch memory 512Mi→1024Mi + rollout restart',
-          human_input: 'ZERO',
-          before_state: { healthy: false, restarts: 7 },
-          after_state: { healthy: true, restarts: 0 },
-          nist_controls: ['SI-2', 'SI-7', 'AU-2'],
-          prooflink_receipt_id: `demo-${incident_id}`,
-          verify_url: `https://verify.itechsmart.dev/demo-${incident_id}`,
+      const incident_id = String(safeArgs.incident_id || '').trim()
+      if (!incident_id) {
+        return {
+          content: [{
+            type: 'text', text: JSON.stringify({
+              found: false, error: 'incident_id is required',
+            }, null, 2),
+          }],
         }
       }
-      return { content: [{ type: 'text', text: JSON.stringify(incident, null, 2) }] }
-    }
 
-    case 'list_recent_incidents': {
-      const limit = typeof safeArgs.limit === 'number' ? safeArgs.limit : 10
-      const since = safeArgs.since ? String(safeArgs.since) : undefined
-      let incidents: Record<string, unknown>[]
-      try {
-        const endpoint = since
-          ? `/incidents?limit=${limit}&since=${since}`
-          : `/incidents?limit=${limit}`
-        incidents = await fetchFromAPI(endpoint)
-      } catch {
-        incidents = Array.from({ length: Math.min(limit, 5) }, (_, i) => ({
-          incident_id: `inc-${Date.now() - i * 3600000}`,
-          timestamp: new Date(Date.now() - i * 3600000).toISOString(),
-          trigger: ['OOMKilled', 'CrashLoopBackOff', 'ConnectionPoolExhausted', 'DiskPressure', 'NetworkTimeout'][i % 5],
-          container: `suite-service-${i}`,
-          detection_ms: 2000 + Math.floor(Math.random() * 4000),
-          remediation_ms: 15000 + Math.floor(Math.random() * 10000),
-          human_input: 'ZERO', resolved: true,
-        }))
+      const entries = readCanonicalLedger()
+      const entry = entries.find(e => {
+        if (e.id === incident_id) return true
+        if (e.hash_sha256 === incident_id) return true
+        if (e.id && e.id.startsWith(incident_id)) return true
+        const det = (e.details && typeof e.details === 'object')
+          ? e.details as Record<string, unknown>
+          : {}
+        return det.receipt_id === incident_id
+          || det.ticket_id === incident_id
+          || det.itsm_ticket === incident_id
+          || det.run_id === incident_id
+          || det.incident_id === incident_id
+      })
+
+      if (!entry) {
+        return {
+          content: [{
+            type: 'text', text: JSON.stringify({
+              found: false,
+              incident_id,
+              message: 'Incident not found in ProofLink ledger',
+              ledger_path: CANONICAL_LEDGER_PATH,
+              ledger_entries: entries.length,
+              hint: 'Try list_recent_incidents to find a valid incident id',
+              scope: 'incident:classify:read',
+            }, null, 2),
+          }],
+        }
       }
+
+      const det = (entry.details && typeof entry.details === 'object')
+        ? entry.details as Record<string, unknown>
+        : {}
       return {
         content: [{
           type: 'text', text: JSON.stringify({
-            total: incidents.length,
-            incidents,
+            found: true,
+            id: entry.id,
+            timestamp: entry.timestamp,
+            category: entry.category,
+            actor: entry.actor,
+            subject: entry.subject,
+            action: entry.action,
+            outcome: entry.outcome,
+            details: entry.details,
+            detection_time_seconds: det.detection_time_seconds ?? null,
+            recovery_time_seconds: det.recovery_time_seconds ?? null,
+            auto_resolved: det.auto_resolved ?? null,
+            human_intervention: det.human_intervention ?? null,
+            hash_sha256: entry.hash_sha256,
+            prev_hash: entry.prev_hash,
+            verify_url: entry.verify_url || `https://verify.itechsmart.dev/${entry.id}`,
+            scope: 'incident:classify:read',
+          }, null, 2),
+        }],
+      }
+    }
+
+    case 'list_recent_incidents': {
+      const limit = Math.min(
+        Math.max(typeof safeArgs.limit === 'number' ? safeArgs.limit : 10, 1),
+        50,
+      )
+      const since = safeArgs.since ? String(safeArgs.since) : null
+
+      const entries = readCanonicalLedger()
+      let filtered = entries.filter(e => INCIDENT_CATEGORIES.has(e.category))
+      if (since) {
+        filtered = filtered.filter(e => e.timestamp && e.timestamp >= since)
+      }
+      // Canonical ledger is already newest-first; just take N.
+      const window = filtered.slice(0, limit)
+
+      return {
+        content: [{
+          type: 'text', text: JSON.stringify({
+            total_available: filtered.length,
+            showing: window.length,
+            since,
+            incidents: window.map(r => {
+              const det = (r.details && typeof r.details === 'object')
+                ? r.details as Record<string, unknown>
+                : {}
+              return {
+                incident_id: r.id,
+                timestamp: r.timestamp,
+                category: r.category,
+                actor: r.actor,
+                subject: r.subject,
+                trigger: det.trigger ?? det.failure_type ?? (r.action ? r.action.substring(0, 100) : null),
+                detection_time_seconds: det.detection_time_seconds ?? null,
+                recovery_time_seconds: det.recovery_time_seconds ?? null,
+                auto_resolved: det.auto_resolved ?? null,
+                human_intervention: det.human_intervention ?? null,
+                playbook: det.playbook ?? null,
+                prooflink_receipt_id: r.id,
+                sha256_preview: r.hash_sha256 ? r.hash_sha256.substring(0, 16) + '...' : null,
+                verify_url: r.verify_url || `https://verify.itechsmart.dev/${r.id}`,
+              }
+            }),
+            categories_searched: Array.from(INCIDENT_CATEGORIES),
+            ledger_path: CANONICAL_LEDGER_PATH,
             platform_url: 'https://itechsmart.dev',
             verify_all: 'https://verify.itechsmart.dev',
+            scope: 'incident:classify:read',
           }, null, 2),
         }],
       }
