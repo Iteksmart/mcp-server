@@ -875,60 +875,106 @@ async function dispatchTool(name: string, args: unknown): Promise<unknown> {
 
     case 'simulate_infrastructure_attack': {
       const attack_type = String(safeArgs.attack_type || 'oomkilled')
-      const attackDescriptions: Record<string, string> = {
-        oomkilled: 'Kubernetes pod OOMKilled — memory limit exceeded, CrashLoopBackOff',
-        crashloop: 'Container entering CrashLoopBackOff — liveness probe failing',
-        connection_exhausted: 'PostgreSQL connection pool exhausted — max_connections reached',
-        disk_full: 'Node disk pressure — ephemeral storage 95% utilized',
+      const target = String((safeArgs as Record<string, unknown>).target || 'break-it-sandbox')
+
+      // Trigger the REAL break-it-api on this host. This stops + restarts
+      // the break-it-sandbox container, polls for health recovery, and
+      // append.py-seals a self_healing receipt to the canonical ledger.
+      let runId: string | null = null
+      let breakItStatus = 0
+      let breakItResponse: Record<string, unknown> | null = null
+      try {
+        const res = await fetch(BREAK_IT_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: attack_type, target }),
+          signal: AbortSignal.timeout(30000),
+        })
+        breakItStatus = res.status
+        breakItResponse = await res.json() as Record<string, unknown>
+        runId = breakItResponse?.run_id ? String(breakItResponse.run_id) : null
+      } catch (e) {
+        return {
+          content: [{
+            type: 'text', text: JSON.stringify({
+              status: 'failed_to_trigger',
+              error: 'break-it API unreachable',
+              detail: e instanceof Error ? e.message : String(e),
+              break_it_endpoint: BREAK_IT_API_URL,
+              attack_type, target,
+              scope: 'digitaltwin:simulate:read',
+            }, null, 2),
+          }],
+        }
       }
-      const attackMs = 2000 + Math.floor(Math.random() * 2000)
-      const remediationMs = 15000 + Math.floor(Math.random() * 8000)
-      const receiptBase = {
-        receipt_id: crypto.randomBytes(8).toString('hex'),
-        version: '1.0',
-        timestamp: new Date().toISOString(),
-        container: 'suite-api-sandbox-demo',
-        executor: 'OctoAI/Nemotron-Ultra-253B/v1.0',
-        trigger: attackDescriptions[attack_type] || attackDescriptions.oomkilled,
-        action: attack_type === 'oomkilled'
-          ? 'kubectl patch memory 512Mi→1024Mi + rollout restart'
-          : attack_type === 'connection_exhausted'
-          ? 'pg_reload_conf + connection pool reset'
-          : attack_type === 'disk_full'
-          ? 'log rotation + ephemeral storage cleanup'
-          : 'Pod restart with health check validation',
-        action_parameters: { sandbox: true, attack_type },
-        before_state: { snapshot_hash: crypto.randomBytes(4).toString('hex'), healthy: false, metrics: { restarts: 7 } },
-        after_state: { snapshot_hash: crypto.randomBytes(4).toString('hex'), healthy: true, metrics: { restarts: 0 } },
-        nist_controls: ['SI-2', 'SI-7', 'AU-2', 'RC.RP-2'],
-        human_input: 'ZERO' as const,
-        arbiter_policy: 'auto-remediation-v2',
-        previous_hash: null,
-        chain_position: 0,
+
+      if (!runId) {
+        return {
+          content: [{
+            type: 'text', text: JSON.stringify({
+              status: 'no_run_id',
+              break_it_status: breakItStatus,
+              break_it_response: breakItResponse,
+              scope: 'digitaltwin:simulate:read',
+            }, null, 2),
+          }],
+        }
       }
-      const receipt = { ...receiptBase, sha256: computeReceiptHash(receiptBase) }
+
+      // Recovery + receipt seal typically completes in ~7s. Poll the
+      // canonical ledger for an entry matching this run_id (up to ~15s).
+      const pollDeadline = Date.now() + 15000
+      let receipt: LedgerEntry | undefined
+      while (Date.now() < pollDeadline) {
+        await new Promise(r => setTimeout(r, 1500))
+        const entries = readCanonicalLedger()
+        receipt = entries.find(e => {
+          const d = (e.details && typeof e.details === 'object')
+            ? e.details as Record<string, unknown>
+            : null
+          return d != null && d.run_id === runId
+        })
+        if (receipt) break
+      }
+
+      // Re-read by id (not object reference); the ledger may have grown
+      // since the poll due to the MCP self-report receipt for this very call.
+      const finalEntries = readCanonicalLedger()
+      const finalIdx = receipt
+        ? finalEntries.findIndex(e => e.id === receipt!.id)
+        : -1
+      const det = (receipt?.details && typeof receipt.details === 'object')
+        ? receipt.details as Record<string, unknown>
+        : {}
+
       return {
         content: [{
           type: 'text', text: JSON.stringify({
-            simulation: '⚡ UAIO Autonomous Loop — SANDBOX',
+            run_id: runId,
+            status: receipt ? 'completed' : 'receipt_pending',
+            real_execution: true,
             attack_type,
-            phases: [
-              { phase: '01 DETECT', system: 'Pulse Scanner', result: `Anomaly detected: ${receipt.trigger}`, time_ms: attackMs },
-              { phase: '02 SIMULATE', system: 'Digital Twin', result: 'Blast radius: ZERO collateral impact confirmed', time_ms: attackMs + 800 },
-              { phase: '03 DECIDE', system: 'OctoAI/Nemotron Ultra 253B', result: `Selected action: ${receipt.action}`, time_ms: attackMs + 1600 },
-              { phase: '04 FIX', system: 'Suite Engine', result: 'Autonomous remediation executed — human input: ZERO', time_ms: remediationMs },
-              { phase: '05 PROVE', system: 'ProofLink™', result: 'Cryptographic receipt generated — chain intact', time_ms: remediationMs + 200 },
-            ],
-            performance: {
-              detection_ms: attackMs,
-              remediation_ms: remediationMs,
-              total_ms: remediationMs + 200,
-              human_input: 'ZERO',
-            },
-            prooflink_receipt: receipt,
-            note: 'SANDBOX ONLY — No production systems affected',
+            target,
+            break_it_endpoint: BREAK_IT_API_URL,
+            stream_url: breakItResponse?.stream_url || null,
+            receipt_id: receipt?.id || null,
+            sha256: receipt?.hash_sha256 || null,
+            detection_time_seconds: det.detection_time_seconds ?? null,
+            recovery_time_seconds: det.recovery_time_seconds ?? null,
+            auto_resolved: det.auto_resolved ?? null,
+            human_intervention: det.human_intervention ?? null,
+            playbook: det.playbook ?? null,
+            position_from_newest: finalIdx >= 0 ? finalIdx : null,
+            verify_url: receipt
+              ? (receipt.verify_url || `https://verify.itechsmart.dev/${receipt.id}`)
+              : null,
+            ots_note: 'Each break-it receipt is submitted to 4 OpenTimestamps calendars at creation; Bitcoin block confirmation lands via the upgrade cron within ~hours.',
+            message: receipt
+              ? 'Real container attack executed. Recovery completed. Receipt sealed to canonical ProofLink ledger.'
+              : 'Container attack executed but receipt not yet visible in canonical ledger after 15s poll. Try get_incident_details with run_id or verify_prooflink_receipt later.',
             live_demo: 'https://itechsmart.dev/break-it',
             verify: 'https://verify.itechsmart.dev',
+            scope: 'digitaltwin:simulate:read',
           }, null, 2),
         }],
       }
