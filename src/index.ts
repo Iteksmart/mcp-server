@@ -31,7 +31,6 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import crypto from 'crypto'
 import * as fs from 'fs'
-import * as path from 'path'
 import http from 'http'
 import { execSync } from 'child_process'
 
@@ -1115,26 +1114,6 @@ async function startHttp() {
         return
       }
 
-      // ── /mcp/tools — open discovery endpoint, returns the rich tools.json schema ──
-      // Public on purpose: Glama and other MCP registries crawl this for tool inventory.
-      // Auth-required endpoints (/sse, tools/list over JSON-RPC) remain gated.
-      if (req.method === 'GET' && reqUrl.pathname === '/mcp/tools') {
-        try {
-          const toolsPath = path.resolve(__dirname, '..', 'src', 'tools.json')
-          const data = fs.readFileSync(toolsPath, 'utf8')
-          res.writeHead(200, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'public, max-age=300',
-            'Access-Control-Allow-Origin': '*',
-          })
-          res.end(data)
-        } catch (e) {
-          res.writeHead(500, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: 'tools.json unreadable', detail: String(e) }))
-        }
-        return
-      }
-
       // ── GET /sse — auth required to establish session ──
       if (req.method === 'GET' && reqUrl.pathname === '/sse') {
         const key = extractBearerKey(req.headers, reqUrl.searchParams)
@@ -1239,7 +1218,44 @@ async function startHttp() {
   })
 }
 
+const PKG_VERSION = '2.0.0'
+
+function printHelp() {
+  console.log(`iTechSmart MCP Server v${PKG_VERSION}
+
+Usage:
+  itechsmart-mcp-server                   start in stdio mode (default)
+  MCP_TRANSPORT=http itechsmart-mcp-server start the HTTP+SSE server on $PORT (default 3200)
+  itechsmart-mcp-server --version | -v    print version and exit
+  itechsmart-mcp-server --help    | -h    print this help and exit
+
+Tools: 6 (verify_prooflink_receipt, get_receipt_chain, query_uaio_status,
+            get_incident_details, list_recent_incidents,
+            simulate_infrastructure_attack)
+
+Environment:
+  ITECHSMART_MCP_API_KEYS    Comma-separated API keys (required to call tools)
+  MCP_RATE_LIMIT_PER_MIN     Default 60
+  MCP_RATE_LIMIT_SIMULATE    Default 10
+  SELF_REPORT_URL            ProofLink sink (default http://localhost:3202/agent/self-report)
+  CANONICAL_LEDGER_PATH      Override ledger path (default /opt/itechsmart/audit_ledger/ledger.json)
+  BREAK_IT_API_URL           Override break-it endpoint (default http://localhost:8765/api/attack)
+
+Docs: https://github.com/Iteksmart/mcp-server
+Contact: enterprise@itechsmart.dev`)
+}
+
 async function main() {
+  const argv = process.argv.slice(2)
+  if (argv.includes('--version') || argv.includes('-v')) {
+    console.log(PKG_VERSION)
+    return
+  }
+  if (argv.includes('--help') || argv.includes('-h')) {
+    printHelp()
+    return
+  }
+
   const useHttp = (process.env.MCP_TRANSPORT || '').toLowerCase() === 'http'
   if (useHttp) await startHttp()
   else await startStdio()
