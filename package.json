@@ -1,6 +1,6 @@
 {
   "name": "@itechsmart/mcp-server",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "iTechSmart UAIO MCP Server — connect any AI agent to ProofLink verification and autonomous IT operations",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

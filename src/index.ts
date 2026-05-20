@@ -31,6 +31,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 import crypto from 'crypto'
 import * as fs from 'fs'
+import * as path from 'path'
 import http from 'http'
 import { execSync } from 'child_process'
 
@@ -1111,6 +1112,26 @@ async function startHttp() {
           rate_limit_simulate_per_min: RATE_LIMIT_SIMULATE_PER_MIN,
           timestamp: new Date().toISOString(),
         }))
+        return
+      }
+
+      // ── /mcp/tools — open discovery endpoint, returns the rich tools.json schema ──
+      // Public on purpose: Glama and other MCP registries crawl this for tool inventory.
+      // Auth-required endpoints (/sse, tools/list over JSON-RPC) remain gated.
+      if (req.method === 'GET' && reqUrl.pathname === '/mcp/tools') {
+        try {
+          const toolsPath = path.resolve(__dirname, '..', 'src', 'tools.json')
+          const data = fs.readFileSync(toolsPath, 'utf8')
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'public, max-age=300',
+            'Access-Control-Allow-Origin': '*',
+          })
+          res.end(data)
+        } catch (e) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'tools.json unreadable', detail: String(e) }))
+        }
         return
       }
 

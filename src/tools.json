@@ -1,0 +1,268 @@
+{
+  "schema_version": "mcp-tools/1.0",
+  "server": {
+    "name": "iTechSmart UAIO MCP Server",
+    "version": "2.0.0",
+    "description": "Governed autonomous IT operations with cryptographic proof",
+    "governance": "Arbiter Constitutional Governance Engine",
+    "public_ledger": "https://verify.itechsmart.dev",
+    "contact": "enterprise@itechsmart.dev"
+  },
+  "tools": [
+    {
+      "name": "verify_prooflink_receipt",
+      "display_name": "Verify ProofLink Receipt",
+      "description": "Verify the cryptographic integrity of a ProofLink receipt. Checks hash validity, chain linkage to previous receipt, and schema completeness against the canonical production ledger. Returns NOT FOUND for unknown IDs — never synthesizes a result.",
+      "required_scopes": ["read"],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": ["AU-9", "AU-10", "SI-7"],
+      "input_schema": {
+        "type": "object",
+        "required": ["receipt_id"],
+        "properties": {
+          "receipt_id": {
+            "type": "string",
+            "description": "SHA-256 receipt ID or first 16 hex chars of the receipt hash",
+            "example": "e34f57c0dcdc5699"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "found": {"type": "boolean"},
+          "verification_result": {"type": "string", "enum": ["VERIFIED", "TAMPERED", "RECEIPT_NOT_FOUND"]},
+          "receipt_id": {"type": "string"},
+          "timestamp": {"type": "string", "format": "date-time"},
+          "category": {"type": "string"},
+          "actor": {"type": "string"},
+          "subject": {"type": "string"},
+          "hash_sha256": {"type": "string"},
+          "prev_hash": {"type": "string"},
+          "chain_intact": {"type": "boolean"},
+          "tamper_detected": {"type": "boolean"},
+          "auto_resolved": {"type": "boolean"},
+          "human_intervention": {"type": "boolean"},
+          "recovery_time_seconds": {"type": "number"},
+          "nist_controls": {"type": "array", "items": {"type": "string"}},
+          "verify_url": {"type": "string", "format": "uri"}
+        }
+      }
+    },
+    {
+      "name": "get_receipt_chain",
+      "display_name": "Get Receipt Chain",
+      "description": "Fetch and verify the complete ProofLink receipt chain from the canonical production ledger. Returns real receipt count, chain break count, and the N most recent entries with full cryptographic metadata.",
+      "required_scopes": ["read"],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": ["AU-9", "AU-10"],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "description": "Number of recent receipts to return",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 50
+          },
+          "category": {
+            "type": "string",
+            "description": "Filter by receipt category",
+            "enum": ["self_healing", "platform_fix", "wazuh_alert", "platform_health_check", "all"]
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "total_receipts": {"type": "integer"},
+          "chain_valid": {"type": "boolean"},
+          "chain_breaks": {"type": "integer"},
+          "chain_start": {"type": "string", "format": "date-time"},
+          "latest_timestamp": {"type": "string", "format": "date-time"},
+          "status": {"type": "string"},
+          "receipts": {"type": "array"}
+        }
+      }
+    },
+    {
+      "name": "query_uaio_status",
+      "display_name": "Query UAIO Platform Status",
+      "description": "Real-time platform health metrics. Container count via live docker ps, receipt count from canonical ledger, NIST CSF and HIPAA compliance scores. No hardcoded values.",
+      "required_scopes": ["read"],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": ["CA-7", "SI-4"],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "containers": {
+            "type": "object",
+            "properties": {
+              "healthy": {"type": "integer"},
+              "total": {"type": "integer"},
+              "health_pct": {"type": "number"}
+            }
+          },
+          "prooflink": {
+            "type": "object",
+            "properties": {
+              "receipts_generated": {"type": "integer"},
+              "chain_breaks": {"type": "integer"},
+              "chain_status": {"type": "string"},
+              "last_receipt_timestamp": {"type": "string"}
+            }
+          },
+          "compliance": {
+            "type": "object",
+            "properties": {
+              "nist_csf_score": {"type": "number"},
+              "hipaa_compliant": {"type": "boolean"},
+              "fedramp_pathway": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "get_incident_details",
+      "display_name": "Get Incident Details",
+      "description": "Fetch details of a specific autonomous remediation incident from the canonical ProofLink ledger. Returns the actual ledger entry with before/after state, remediation actions, timing, and receipt ID. Returns NOT FOUND for unknown IDs.",
+      "required_scopes": ["read"],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": ["IR-4", "IR-5", "AU-9"],
+      "input_schema": {
+        "type": "object",
+        "required": ["incident_id"],
+        "properties": {
+          "incident_id": {
+            "type": "string",
+            "description": "ProofLink receipt ID, ledger entry ID, or ITSM ticket ID"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "found": {"type": "boolean"},
+          "incident_id": {"type": "string"},
+          "timestamp": {"type": "string", "format": "date-time"},
+          "category": {"type": "string"},
+          "subject": {"type": "string"},
+          "action": {"type": "string"},
+          "outcome": {"type": "string"},
+          "detection_time_seconds": {"type": "number"},
+          "recovery_time_seconds": {"type": "number"},
+          "auto_resolved": {"type": "boolean"},
+          "human_intervention": {"type": "boolean"},
+          "playbook": {"type": "string"},
+          "prooflink_receipt_id": {"type": "string"},
+          "verify_url": {"type": "string"},
+          "nist_controls": {"type": "array"}
+        }
+      }
+    },
+    {
+      "name": "list_recent_incidents",
+      "display_name": "List Recent Incidents",
+      "description": "Returns chronological list of recent autonomous remediation incidents from the canonical ProofLink ledger. All entries are real — no generated or synthetic data.",
+      "required_scopes": ["read"],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": ["IR-5", "AU-6"],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 50
+          },
+          "category": {
+            "type": "string",
+            "enum": ["self_healing", "platform_fix", "wazuh_alert", "all"],
+            "default": "all"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "total": {"type": "integer"},
+          "incidents": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "incident_id": {"type": "string"},
+                "timestamp": {"type": "string"},
+                "category": {"type": "string"},
+                "subject": {"type": "string"},
+                "action": {"type": "string"},
+                "outcome": {"type": "string"},
+                "auto_resolved": {"type": "boolean"},
+                "detection_time_seconds": {"type": "number"},
+                "recovery_time_seconds": {"type": "number"},
+                "prooflink_receipt_id": {"type": "string"},
+                "verify_url": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "simulate_infrastructure_attack",
+      "display_name": "Simulate Infrastructure Attack",
+      "description": "Trigger a real infrastructure attack simulation against an isolated sandbox container via the Break-It API. The platform autonomously detects, remediates, and generates a real ProofLink receipt from the canonical ledger. Returns actual timing and receipt — nothing is synthesized.",
+      "required_scopes": ["execute:limited"],
+      "tier": "remediation",
+      "prooflink_receipt_generated": true,
+      "nist_controls": ["CA-8", "CP-4", "SI-6", "IR-3"],
+      "rate_limit": "10 per hour per caller",
+      "arbiter_required": true,
+      "digital_twin_required": true,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "attack_type": {
+            "type": "string",
+            "description": "Type of attack to simulate",
+            "enum": ["oomkilled", "crashloopbackoff", "network_timeout", "disk_pressure"],
+            "default": "oomkilled"
+          },
+          "target": {
+            "type": "string",
+            "description": "Target container (must be in the isolated sandbox pool)",
+            "default": "break-it-sandbox"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "run_id": {"type": "string"},
+          "status": {"type": "string"},
+          "real_execution": {"type": "boolean"},
+          "detection_time_seconds": {"type": "number"},
+          "recovery_time_seconds": {"type": "number"},
+          "auto_resolved": {"type": "boolean"},
+          "human_intervention": {"type": "boolean"},
+          "receipt_id": {"type": "string"},
+          "verify_url": {"type": "string"},
+          "chain_position": {"type": "integer"},
+          "message": {"type": "string"}
+        }
+      }
+    }
+  ]
+}
