@@ -272,7 +272,7 @@ async function selfReport(
           human_intervention: false,
         },
       }),
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(15000),
     })
     if (!res.ok) {
       console.error(`[self-report] ${event} returned ${res.status}`)
@@ -1000,21 +1000,21 @@ async function authedCallTool(
 ): Promise<AuthedResult> {
   const key = extractBearerKey(headers, query)
   if (!isValidKey(key)) {
-    await selfReport('WARN', 'mcp_invalid_auth', {
+    void selfReport('WARN', 'mcp_invalid_auth', {
       tool: toolName, key_provided: !!key,
     })
     return { status: 401, body: { error: 'invalid or missing API key' } }
   }
   const scope = TOOL_SCOPES[toolName]
   if (!scope) {
-    await selfReport('WARN', 'mcp_unknown_tool', {
+    void selfReport('WARN', 'mcp_unknown_tool', {
       tool: toolName, caller_key_prefix: keyPrefix(key!),
     })
     return { status: 404, body: { error: 'unknown tool' } }
   }
   const kp = keyPrefix(key!)
   if (!rateAllow(kp, toolName)) {
-    await selfReport('WARN', 'mcp_rate_limit_exceeded', {
+    void selfReport('WARN', 'mcp_rate_limit_exceeded', {
       tool: toolName, scope, caller_key_prefix: kp,
     })
     return {
@@ -1026,7 +1026,7 @@ async function authedCallTool(
   try {
     const result = await dispatchTool(toolName, args)
     const duration_ms = Date.now() - t0
-    await selfReport('INFO', 'mcp_tool_call', {
+    void selfReport('INFO', 'mcp_tool_call', {
       tool: toolName, scope, caller_key_prefix: kp,
       result: 'success', duration_ms,
     })
@@ -1034,7 +1034,7 @@ async function authedCallTool(
   } catch (e) {
     const duration_ms = Date.now() - t0
     console.error(`[mcp] tool '${toolName}' failed:`, e instanceof Error ? e.stack || e.message : String(e))
-    await selfReport('WARN', 'mcp_tool_error', {
+    void selfReport('WARN', 'mcp_tool_error', {
       tool: toolName, scope, caller_key_prefix: kp,
       result: 'error', duration_ms,
     })
@@ -1140,7 +1140,7 @@ async function startHttp() {
       if (req.method === 'GET' && reqUrl.pathname === '/sse') {
         const key = extractBearerKey(req.headers, reqUrl.searchParams)
         if (!isValidKey(key)) {
-          await selfReport('WARN', 'mcp_invalid_auth', { endpoint: 'sse_connect' })
+          void selfReport('WARN', 'mcp_invalid_auth', { endpoint: 'sse_connect' })
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'invalid or missing API key' }))
           return
@@ -1172,12 +1172,12 @@ async function startHttp() {
           if (parsed.method === 'tools/list') {
             const key = extractBearerKey(req.headers, reqUrl.searchParams)
             if (!isValidKey(key)) {
-              await selfReport('WARN', 'mcp_invalid_auth', { endpoint: 'tools_list' })
+              void selfReport('WARN', 'mcp_invalid_auth', { endpoint: 'tools_list' })
               res.writeHead(401, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, error: { code: -32000, message: 'invalid or missing API key' } }))
               return
             }
-            await selfReport('INFO', 'mcp_tools_list', { caller_key_prefix: keyPrefix(key!) })
+            void selfReport('INFO', 'mcp_tools_list', { caller_key_prefix: keyPrefix(key!) })
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ jsonrpc: '2.0', id: parsed.id, result: { tools: TOOLS } }))
             return
