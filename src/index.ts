@@ -1145,9 +1145,20 @@ async function startHttp() {
           res.end(JSON.stringify({ error: 'invalid or missing API key' }))
           return
         }
+        // MCP_SSE_RECONNECT_FIX — SDK requires close() before reconnecting
+        // a single Server instance to a new transport. Without this, the
+        // 2nd /sse request throws "Already connected to a transport."
+        // Defensive close-then-connect handles: (1) prior client crashed
+        // without res.on('close') firing, (2) rapid reconnects in test.
+        try { await server.close() } catch { /* ignore — may not be connected */ }
         SSE_SESSION_KEY = key
         sseTransport = new SSEServerTransport('/messages', res)
-        res.on('close', () => { sseTransport = null; SSE_SESSION_KEY = null })
+        res.on('close', () => {
+          sseTransport = null
+          SSE_SESSION_KEY = null
+          // Release the SDK's internal binding so the next /sse can connect()
+          server.close().catch(() => { /* ignore — may already be closed */ })
+        })
         await server.connect(sseTransport)
         return
       }
