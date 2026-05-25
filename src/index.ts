@@ -59,6 +59,7 @@ const TOOL_SCOPES: Record<string, string> = {
   get_incident_details: 'incident:classify:read',
   list_recent_incidents: 'incident:classify:read',
   simulate_infrastructure_attack: 'digitaltwin:simulate:read',
+  invoke_octoai_pipeline: 'octoai:pipeline:invoke',
 
   // Aliases (Phase 1 sprint spec — forward to canonical)
   verify_receipt: 'prooflink:verify:read',
@@ -477,6 +478,32 @@ const TOOLS = [
           description: 'Type of simulated failure (default: oomkilled)',
         },
       },
+    },
+  },
+  {
+    name: 'invoke_octoai_pipeline',
+    description:
+      'Invoke the OctoAI 7-node cognitive pipeline with a free-form prompt. '
+      + 'Routes the question through the multi-agent reasoning chain '
+      + '(Knowledge Miner, Logic Engine, Systems Architect, Strategic Thinker, Physics Engine) '
+      + 'and returns a synthesized final_answer with a confidence score. '
+      + 'Use for open-ended platform questions, decision support, or anything that needs '
+      + "OctoAI's reasoning rather than a deterministic infrastructure lookup. "
+      + 'POSTs to http://localhost:8100/query.'
+      + scopeNote(TOOL_SCOPES.invoke_octoai_pipeline),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        prompt: {
+          type: 'string',
+          description: 'The question or instruction to send to the pipeline (1-32000 chars).',
+        },
+        session_id: {
+          type: 'string',
+          description: 'Optional session id for memory continuity (default: hermes-mcp-default).',
+        },
+      },
+      required: ['prompt'],
     },
   },
 ]
@@ -978,6 +1005,79 @@ async function dispatchTool(name: string, args: unknown): Promise<unknown> {
             scope: 'digitaltwin:simulate:read',
           }, null, 2),
         }],
+      }
+    }
+
+    case 'invoke_octoai_pipeline': {
+      const prompt = String(safeArgs.prompt || '').trim()
+      const session_id = String(safeArgs.session_id || 'hermes-mcp-default')
+      if (!prompt) {
+        return {
+          content: [{
+            type: 'text', text: JSON.stringify({
+              error: 'prompt is required',
+              scope: 'octoai:pipeline:invoke',
+            }, null, 2),
+          }],
+        }
+      }
+      if (prompt.length > 32000) {
+        return {
+          content: [{
+            type: 'text', text: JSON.stringify({
+              error: 'prompt exceeds 32000 chars',
+              length: prompt.length,
+              scope: 'octoai:pipeline:invoke',
+            }, null, 2),
+          }],
+        }
+      }
+
+      const octoaiUrl = process.env.OCTOAI_URL || 'http://localhost:8100/query'
+      try {
+        const res = await fetch(octoaiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt, session_id }),
+          signal: AbortSignal.timeout(180000),
+        })
+        if (!res.ok) {
+          const detail = await res.text().catch(() => '')
+          return {
+            content: [{
+              type: 'text', text: JSON.stringify({
+                error: `OctoAI /query returned HTTP ${res.status}`,
+                detail: detail.slice(0, 500),
+                octoai_url: octoaiUrl,
+                scope: 'octoai:pipeline:invoke',
+              }, null, 2),
+            }],
+          }
+        }
+        const data = await res.json() as { final_answer?: string; confidence?: number; task_id?: string }
+        return {
+          content: [{
+            type: 'text', text: JSON.stringify({
+              final_answer: data.final_answer || '',
+              confidence: data.confidence ?? null,
+              task_id: data.task_id || '',
+              session_id,
+              octoai_url: octoaiUrl,
+              scope: 'octoai:pipeline:invoke',
+            }, null, 2),
+          }],
+        }
+      } catch (e) {
+        return {
+          content: [{
+            type: 'text', text: JSON.stringify({
+              error: 'failed to call OctoAI pipeline',
+              detail: e instanceof Error ? e.message : String(e),
+              octoai_url: octoaiUrl,
+              scope: 'octoai:pipeline:invoke',
+            }, null, 2),
+          }],
+        }
       }
     }
 
