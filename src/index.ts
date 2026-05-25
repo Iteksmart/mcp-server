@@ -1165,6 +1165,22 @@ async function startHttp() {
 
       // ── POST /messages — either stateless (auth header) or SSE-session ──
       if (req.method === 'POST' && reqUrl.pathname === '/messages') {
+        // MCP_SSE_ROUTING_FIX — when sessionId present, route via SSEServerTransport
+        // first (legacy MCP SSE protocol expects initialize/tools/list/tools/call to
+        // flow through the bound transport). Without this, authed clients with a
+        // sessionId fall into stateless mode which only handles tools/list and
+        // tools/call -> initialize gets 400 "unknown method".
+        const sessionId = reqUrl.searchParams.get('sessionId')
+        if (sessionId && sseTransport) {
+          if (!extractBearerKey(req.headers, reqUrl.searchParams)) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'Authorization header required' }))
+            return
+          }
+          await sseTransport.handlePostMessage(req, res)
+          return
+        }
+
         const hasAuth = !!extractBearerKey(req.headers, reqUrl.searchParams)
 
         if (hasAuth) {
