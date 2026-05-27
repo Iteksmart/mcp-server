@@ -1253,7 +1253,15 @@ async function startHttp() {
         try { await server.close() } catch { /* ignore — may not be connected */ }
         SSE_SESSION_KEY = key
         sseTransport = new SSEServerTransport('/messages', res)
+        // MCP_SSE_KEEPALIVE_FIX — SDK does not emit periodic keepalive frames.
+        // Without these, idle connections drop after ~3 min and Hermes logs
+        // "keepalive failed, triggering reconnect" on a 3-min cadence.
+        // Send a comment-line keepalive every 25s while the SSE socket is open.
+        const keepaliveTimer = setInterval(() => {
+          try { res.write(`: keepalive${String.fromCharCode(10)}${String.fromCharCode(10)}`) } catch { /* socket may be closed */ }
+        }, 25_000)
         res.on('close', () => {
+          clearInterval(keepaliveTimer)
           sseTransport = null
           SSE_SESSION_KEY = null
           // Release the SDK's internal binding so the next /sse can connect()
