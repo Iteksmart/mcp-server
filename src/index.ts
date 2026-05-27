@@ -1160,7 +1160,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params
   // SSE-mode calls land here. Auth was validated at GET /sse. Use the
   // dispatch path with a synthetic header set so self-report still fires.
-  const fakeHeaders: http.IncomingHttpHeaders = { authorization: `Bearer ${SSE_SESSION_KEY || ''}` }
+  const fakeHeaders: http.IncomingHttpHeaders = { authorization: 'Bearer ' }  // stdio path; SSE-session attribution handled per-session via createSession factory
   const result = await authedCallTool(fakeHeaders, new URLSearchParams(), name, args)
   if (result.status === 200) return result.body as Record<string, unknown>
   throw new McpError(
@@ -1171,9 +1171,41 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   )
 })
 
-// Track the key used to establish the current SSE session, so SDK-routed
-// tool calls can be attributed and rate-limited.
-let SSE_SESSION_KEY: string | null = null
+// ─── MCP_PER_SESSION_FIX — session map + factory ─────────────────────────────
+// The SDK's Server is a singleton bound to ONE transport at a time. When
+// multiple clients open /sse concurrently (e.g., persistent gateway +
+// one-shot hermes -z calls), each new connect() steals the binding from
+// the previous transport, stranding any in-flight response on the older
+// session and triggering 'keepalive failed' reconnect loops on the client.
+// Fix: per-session Server+Transport pair, routed by sessionId.
+interface McpSession {
+  server: Server
+  transport: SSEServerTransport
+  apiKey: string
+}
+const SESSIONS = new Map<string, McpSession>()
+
+function createSession(res: http.ServerResponse, apiKey: string): McpSession {
+  const sessionServer = new Server(
+    { name: 'itechsmart-uaio', version: '2.0.0' },
+    { capabilities: { tools: {} } },
+  )
+  sessionServer.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
+  sessionServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params
+    const fakeHeaders: http.IncomingHttpHeaders = { authorization: `Bearer ${apiKey}` }
+    const result = await authedCallTool(fakeHeaders, new URLSearchParams(), name, args)
+    if (result.status === 200) return result.body as Record<string, unknown>
+    throw new McpError(
+      result.status === 401 ? ErrorCode.InvalidRequest
+      : result.status === 429 ? ErrorCode.InvalidRequest
+      : ErrorCode.InternalError,
+      (result.body as { error?: string }).error || 'mcp error',
+    )
+  })
+  const transport = new SSEServerTransport('/messages', res)
+  return { server: sessionServer, transport, apiKey }
+}
 
 // ─────────────────────────────────────────────
 // HTTP transport
@@ -1189,8 +1221,6 @@ async function startStdio() {
 
 async function startHttp() {
   const port = parseInt(process.env.PORT || '3200', 10)
-  let sseTransport: SSEServerTransport | null = null
-
   const httpServer = http.createServer(async (req, res) => {
     try {
       const reqUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
@@ -1205,7 +1235,7 @@ async function startHttp() {
           phase: '1-secure-governance',
           transport: 'http+sse',
           tools: TOOLS.length,
-          sse_connected: sseTransport !== null,
+          sse_sessions: SESSIONS.size,
           auth_required: true,
           api_keys_loaded: VALID_API_KEYS.size,
           rate_limit_per_min: RATE_LIMIT_PER_MIN,
@@ -1245,29 +1275,22 @@ async function startHttp() {
           res.end(JSON.stringify({ error: 'invalid or missing API key' }))
           return
         }
-        // MCP_SSE_RECONNECT_FIX — SDK requires close() before reconnecting
-        // a single Server instance to a new transport. Without this, the
-        // 2nd /sse request throws "Already connected to a transport."
-        // Defensive close-then-connect handles: (1) prior client crashed
-        // without res.on('close') firing, (2) rapid reconnects in test.
-        try { await server.close() } catch { /* ignore — may not be connected */ }
-        SSE_SESSION_KEY = key
-        sseTransport = new SSEServerTransport('/messages', res)
-        // MCP_SSE_KEEPALIVE_FIX — SDK does not emit periodic keepalive frames.
-        // Without these, idle connections drop after ~3 min and Hermes logs
-        // "keepalive failed, triggering reconnect" on a 3-min cadence.
-        // Send a comment-line keepalive every 25s while the SSE socket is open.
+        // MCP_PER_SESSION_FIX — each /sse gets a fresh Server+Transport pair
+        // (see SESSIONS map above). Concurrent clients no longer clobber.
+        const session = createSession(res, key!)
+        SESSIONS.set(session.transport.sessionId, session)
+        console.error(`[mcp] sse open  sid=${session.transport.sessionId.slice(0,8)} from=${req.socket.remoteAddress} active=${SESSIONS.size}`)
+        // 25s SSE comment-line keepalive — keeps TCP path warm for SSE-watching clients.
         const keepaliveTimer = setInterval(() => {
           try { res.write(`: keepalive${String.fromCharCode(10)}${String.fromCharCode(10)}`) } catch { /* socket may be closed */ }
         }, 25_000)
         res.on('close', () => {
           clearInterval(keepaliveTimer)
-          sseTransport = null
-          SSE_SESSION_KEY = null
-          // Release the SDK's internal binding so the next /sse can connect()
-          server.close().catch(() => { /* ignore — may already be closed */ })
+          SESSIONS.delete(session.transport.sessionId)
+          session.server.close().catch(() => { /* may already be closed */ })
+          console.error(`[mcp] sse close sid=${session.transport.sessionId.slice(0,8)} active=${SESSIONS.size}`)
         })
-        await server.connect(sseTransport)
+        await session.server.connect(session.transport)
         return
       }
 
@@ -1279,13 +1302,19 @@ async function startHttp() {
         // sessionId fall into stateless mode which only handles tools/list and
         // tools/call -> initialize gets 400 "unknown method".
         const sessionId = reqUrl.searchParams.get('sessionId')
-        if (sessionId && sseTransport) {
+        if (sessionId) {
+          const session = SESSIONS.get(sessionId)
+          if (!session) {
+            res.writeHead(404, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: 'session not found' }))
+            return
+          }
           if (!extractBearerKey(req.headers, reqUrl.searchParams)) {
             res.writeHead(401, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ error: 'Authorization header required' }))
             return
           }
-          await sseTransport.handlePostMessage(req, res)
+          await session.transport.handlePostMessage(req, res)
           return
         }
 
@@ -1340,13 +1369,9 @@ async function startHttp() {
           return
         }
 
-        // SSE-session mode (legacy)
-        if (!sseTransport) {
-          res.writeHead(401, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ error: 'Authorization header required (Bearer) or active SSE session' }))
-          return
-        }
-        await sseTransport.handlePostMessage(req, res)
+        // No sessionId and no bearer — refuse.
+        res.writeHead(401, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Authorization header required (Bearer) or active SSE session via sessionId' }))
         return
       }
 
