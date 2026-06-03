@@ -1219,6 +1219,131 @@ async function startStdio() {
   console.error(`Loaded ${VALID_API_KEYS.size} API key(s); ${Object.keys(TOOL_SCOPES).length} tool scope mappings.`)
 }
 
+// ─────────────────────────────────────────────
+// A2A PROTOCOL (Linux Foundation Agent-to-Agent) — same UAIO surface as MCP.
+// Agent Card at /.well-known/agent.json (open); JSON-RPC message/send at POST /a2a (auth).
+// ─────────────────────────────────────────────
+let A2A_SEQ = 0
+function a2aId(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${(A2A_SEQ++).toString(36)}`
+}
+const A2A_TASKS = new Map<string, unknown>()
+function a2aRememberTask(id: string, task: unknown): void {
+  A2A_TASKS.set(id, task)
+  if (A2A_TASKS.size > 200) {
+    const first = A2A_TASKS.keys().next().value
+    if (first !== undefined) A2A_TASKS.delete(first)
+  }
+}
+
+function buildA2AAgentCard(baseUrl: string) {
+  return {
+    protocolVersion: '0.3.0',
+    name: 'iTechSmart UAIO Agent',
+    description:
+      'Agent-to-Agent access to the iTechSmart Unified Autonomous IT Operations pipeline. '
+      + 'Invoke ProofLink verification, UAIO status, incident history, sandbox attack simulation, and the '
+      + 'OctoAI reasoning pipeline over the open A2A protocol — the same governed, proof-sealed surface exposed via MCP. '
+      + 'Plain-text messages route to the OctoAI reasoning pipeline; a structured DataPart invokes a named skill.',
+    url: `${baseUrl}/a2a`,
+    preferredTransport: 'JSONRPC',
+    version: '2.0.0',
+    provider: { organization: 'iTechSmart', url: 'https://itechsmart.dev' },
+    documentationUrl: 'https://mcp.itechsmart.dev/mcp/tools',
+    capabilities: { streaming: false, pushNotifications: false, stateTransitionHistory: false },
+    defaultInputModes: ['text/plain', 'application/json'],
+    defaultOutputModes: ['application/json', 'text/plain'],
+    securitySchemes: { bearer: { type: 'http', scheme: 'bearer', description: 'iTechSmart MCP API key as Bearer token' } },
+    security: [{ bearer: [] }],
+    skills: TOOLS.map((t) => ({
+      id: t.name,
+      name: t.name,
+      description: t.description.split('. ')[0] + '.',
+      tags: ['uaio', 'itechsmart', 'prooflink'],
+      inputModes: ['application/json', 'text/plain'],
+      outputModes: ['application/json'],
+    })),
+  }
+}
+
+async function handleA2A(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  reqUrl: URL,
+): Promise<void> {
+  const key = extractBearerKey(req.headers, reqUrl.searchParams)
+  const chunks: Buffer[] = []
+  for await (const chunk of req) chunks.push(chunk as Buffer)
+  let rpc: { jsonrpc?: string; id?: number | string | null; method?: string; params?: any }
+  try { rpc = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') }
+  catch {
+    res.writeHead(400, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } }))
+    return
+  }
+  const id = rpc.id ?? null
+  const reply = (obj: Record<string, unknown>) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ jsonrpc: '2.0', id, ...obj }))
+  }
+  if (!isValidKey(key)) {
+    void selfReport('WARN', 'a2a_invalid_auth', { method: rpc.method || 'unknown' })
+    reply({ error: { code: -32000, message: 'invalid or missing API key' } })
+    return
+  }
+
+  if (rpc.method === 'message/send') {
+    const msg = rpc.params?.message || {}
+    const parts: any[] = Array.isArray(msg.parts) ? msg.parts : []
+    const dataPart = parts.find((p) => p && p.kind === 'data' && p.data)
+    const textPart = parts.find((p) => p && p.kind === 'text' && typeof p.text === 'string')
+    let skill: string | undefined =
+      rpc.params?.metadata?.skillId || msg?.metadata?.skillId ||
+      dataPart?.data?.skill || dataPart?.data?.tool
+    let toolArgs: unknown = dataPart?.data?.arguments ?? dataPart?.data?.args ?? {}
+    if (!skill && textPart?.text) { skill = 'invoke_octoai_pipeline'; toolArgs = { prompt: textPart.text } }
+
+    const contextId = msg?.contextId || a2aId('ctx')
+    if (!skill) {
+      reply({ result: {
+        role: 'agent', kind: 'message', messageId: a2aId('msg'), contextId,
+        parts: [{ kind: 'text', text: 'Send text to invoke the OctoAI pipeline, or a DataPart {skill, arguments}. Skills: ' + TOOLS.map((t) => t.name).join(', ') }],
+      } })
+      return
+    }
+
+    const taskId = a2aId('task')
+    const result = await authedCallTool(req.headers, reqUrl.searchParams, skill, toolArgs)
+    void selfReport('INFO', 'a2a_message_send', { skill, status: result.status, caller_key_prefix: keyPrefix(key!) })
+    const completed = result.status === 200
+    const task: Record<string, unknown> = {
+      id: taskId,
+      contextId,
+      kind: 'task',
+      status: { state: completed ? 'completed' : 'failed', timestamp: new Date().toISOString() },
+      artifacts: completed ? [{
+        artifactId: a2aId('artifact'),
+        name: `${skill}-result`,
+        parts: [{ kind: 'data', data: result.body }],
+      }] : [],
+      history: [{ role: 'user', kind: 'message', messageId: msg.messageId || a2aId('msg'), parts }],
+    }
+    if (!completed) task.error = result.body
+    a2aRememberTask(taskId, task)
+    reply({ result: task })
+    return
+  }
+
+  if (rpc.method === 'tasks/get') {
+    const t = A2A_TASKS.get(String(rpc.params?.id || ''))
+    if (t) { reply({ result: t }); return }
+    reply({ error: { code: -32001, message: 'Task not found' } })
+    return
+  }
+
+  reply({ error: { code: -32601, message: 'method not supported (use message/send, tasks/get)' } })
+}
+
 async function startHttp() {
   const port = parseInt(process.env.PORT || '3200', 10)
   const httpServer = http.createServer(async (req, res) => {
@@ -1372,6 +1497,20 @@ async function startHttp() {
         // No sessionId and no bearer — refuse.
         res.writeHead(401, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Authorization header required (Bearer) or active SSE session via sessionId' }))
+        return
+      }
+
+      // ── A2A: Agent Card — open discovery at the A2A well-known path ──
+      if (req.method === 'GET' && (reqUrl.pathname === '/.well-known/agent.json' || reqUrl.pathname === '/.well-known/agent-card.json')) {
+        const base = `https://${req.headers.host || 'mcp.itechsmart.dev'}`
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300', 'Access-Control-Allow-Origin': '*' })
+        res.end(JSON.stringify(buildA2AAgentCard(base)))
+        return
+      }
+
+      // ── A2A: JSON-RPC message/send + tasks/get (auth required) ──
+      if (req.method === 'POST' && reqUrl.pathname === '/a2a') {
+        await handleA2A(req, res, reqUrl)
         return
       }
 
