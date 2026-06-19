@@ -919,6 +919,748 @@
           }
         }
       }
+    },
+    {
+      "name": "integration_status",
+      "display_name": "Integration Status Sweep",
+      "description": "Parallel health check across all wired third-party integrations: Langfuse LLM observability, RAGflow RAG platform, Shuffle SOAR, Tactical RMM, MeshCentral device management, and Probo compliance. Returns ok:true/false and service-specific metadata for each.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "CA-7",
+        "SI-4"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "integrations": {
+            "type": "object",
+            "description": "Map of service name to health result"
+          }
+        }
+      }
+    },
+    {
+      "name": "langfuse_health",
+      "display_name": "Langfuse Health",
+      "description": "Check Langfuse LLM observability platform health. Returns ok status and organisation name.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "AU-2",
+        "AU-12",
+        "CA-7"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "org": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "langfuse_trace",
+      "display_name": "Create Langfuse Trace",
+      "description": "Create a Langfuse trace to log an LLM interaction. Captures name, input, output, model, userId, tags, and arbitrary metadata. Returns the trace ID on success.",
+      "required_scopes": [
+        "invoke"
+      ],
+      "tier": "execute",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "AU-2",
+        "AU-3",
+        "AU-12"
+      ],
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Trace name / operation label"
+          },
+          "input": {
+            "description": "Input payload (any JSON value)"
+          },
+          "output": {
+            "description": "Output payload (any JSON value)"
+          },
+          "model": {
+            "type": "string",
+            "description": "Model ID (e.g. claude-sonnet-4-6)"
+          },
+          "userId": {
+            "type": "string",
+            "description": "End-user identifier"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Trace tags"
+          },
+          "metadata": {
+            "description": "Arbitrary metadata object"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "description": "Langfuse trace ID"
+          }
+        }
+      }
+    },
+    {
+      "name": "ragflow_health",
+      "display_name": "RAGflow Health",
+      "description": "Check RAGflow RAG platform health. Returns ok status and total dataset count.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "CA-7",
+        "SI-4"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "datasetCount": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ragflow_query",
+      "display_name": "RAGflow Knowledge Query",
+      "description": "Query the RAGflow knowledge base with a natural-language question. Searches across uploaded documents and returns the answer with source citations. Optionally filter to specific dataset IDs.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "AU-2",
+        "SI-4"
+      ],
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "Natural-language question (max 2000 chars)"
+          },
+          "dataset_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional dataset ID filter"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "answer": {
+            "type": "string"
+          },
+          "sources": {
+            "type": "array"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "shuffle_health",
+      "display_name": "Shuffle SOAR Health",
+      "description": "Check Shuffle SOAR platform health. Returns ok status, authenticated user, and active workflow count.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "CA-7",
+        "IR-4"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "user": {
+            "type": "string"
+          },
+          "workflowCount": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "shuffle_trigger",
+      "display_name": "Trigger Shuffle Workflow",
+      "description": "Trigger a Shuffle SOAR workflow by workflow UUID. Optionally pass a JSON body to the workflow execution trigger. Returns execution result and status.",
+      "required_scopes": [
+        "invoke"
+      ],
+      "tier": "execute",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "IR-4",
+        "IR-5",
+        "CA-7"
+      ],
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "workflow_id"
+        ],
+        "properties": {
+          "workflow_id": {
+            "type": "string",
+            "description": "Shuffle workflow UUID"
+          },
+          "body": {
+            "description": "Optional JSON body passed to the workflow trigger"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "execution_id": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "trmm_health",
+      "display_name": "Tactical RMM Health",
+      "description": "Check Tactical RMM platform health. Returns ok status and total enrolled agent count.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "CA-7",
+        "CM-8"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "agentCount": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "trmm_agents",
+      "display_name": "List TRMM Agents",
+      "description": "List all Tactical RMM managed agents. Returns hostname, OS platform, status (online/offline/overdue), site name, client name, and last-seen timestamp per agent.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "CM-8",
+        "CM-6",
+        "SI-4"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "integer"
+            },
+            "hostname": {
+              "type": "string"
+            },
+            "plat": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "online",
+                "offline",
+                "overdue"
+              ]
+            },
+            "site_name": {
+              "type": "string"
+            },
+            "client_name": {
+              "type": "string"
+            },
+            "last_seen": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "monitoring_type": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "trmm_summary",
+      "display_name": "TRMM Agent Summary",
+      "description": "Get Tactical RMM agent summary: total count, online, offline, overdue, and list of distinct site names.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "CA-7",
+        "CM-8"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "online": {
+            "type": "integer"
+          },
+          "offline": {
+            "type": "integer"
+          },
+          "overdue": {
+            "type": "integer"
+          },
+          "sites": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "trmm_run_script",
+      "display_name": "TRMM Run Script on Agent",
+      "description": "Run a saved Tactical RMM script on a specific managed agent by agent ID and script ID. Returns job ID on success. EXECUTE \u2014 triggers real remote script execution.",
+      "required_scopes": [
+        "invoke"
+      ],
+      "tier": "execute",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "CM-6",
+        "AU-10",
+        "IR-4"
+      ],
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "agent_id",
+          "script_id"
+        ],
+        "properties": {
+          "agent_id": {
+            "type": "string",
+            "description": "TRMM agent ID or agent_id string"
+          },
+          "script_id": {
+            "type": "integer",
+            "description": "TRMM saved script ID (integer)"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "job_id": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "mesh_health",
+      "display_name": "MeshCentral Health",
+      "description": "Check MeshCentral remote device management health via meshctrl CLI. Returns ok status, admin username, and enrolled device count.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "CA-7",
+        "CM-8"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "user": {
+            "type": "string"
+          },
+          "deviceCount": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "mesh_devices",
+      "display_name": "List MeshCentral Devices",
+      "description": "List all devices enrolled in MeshCentral remote management. Returns device name, hostname, OS description, connectivity status, power state, IP address, and mesh group per device.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "CM-8",
+        "CM-6",
+        "SI-4"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "hostname": {
+              "type": "string"
+            },
+            "os": {
+              "type": "string"
+            },
+            "conn": {
+              "type": "integer",
+              "description": "Connectivity bitmask"
+            },
+            "pwr": {
+              "type": "integer",
+              "description": "Power state"
+            },
+            "ip": {
+              "type": "string"
+            },
+            "group": {
+              "type": "string",
+              "description": "Mesh group ID"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "probo_health",
+      "display_name": "Probo Compliance Health",
+      "description": "Check Probo compliance platform health (SOC2 / EU AI Act control tracking). Returns ok status and total control count.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "CA-2",
+        "CA-7"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "controlCount": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "probo_controls",
+      "display_name": "List Probo Controls",
+      "description": "List all Probo compliance controls with status, category, and description. Covers SOC 2 Type II and EU AI Act control frameworks.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "CA-2",
+        "CA-7",
+        "AU-6"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "category": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "probo_risks",
+      "display_name": "List Probo Risks",
+      "description": "List all Probo compliance risks with severity level and status. Use with probo_summary for a full compliance picture.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "RA-3",
+        "CA-7"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "level": {
+              "type": "string",
+              "enum": [
+                "high",
+                "medium",
+                "low"
+              ]
+            },
+            "status": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "probo_summary",
+      "display_name": "Probo Compliance Summary",
+      "description": "Get Probo compliance aggregate summary: control pass/fail/not-started counts, risk high/medium/low breakdown, and task open/done totals.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "CA-2",
+        "CA-7",
+        "RA-3",
+        "AU-6"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "controls": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "passed": {
+                "type": "integer"
+              },
+              "failed": {
+                "type": "integer"
+              },
+              "notStarted": {
+                "type": "integer"
+              }
+            }
+          },
+          "risks": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "high": {
+                "type": "integer"
+              },
+              "medium": {
+                "type": "integer"
+              },
+              "low": {
+                "type": "integer"
+              }
+            }
+          },
+          "tasks": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "open": {
+                "type": "integer"
+              },
+              "done": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }
