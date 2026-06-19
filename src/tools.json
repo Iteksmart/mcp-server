@@ -12,14 +12,22 @@
     {
       "name": "verify_prooflink_receipt",
       "display_name": "Verify ProofLink Receipt",
-      "description": "Verify the cryptographic integrity of a ProofLink receipt. Checks hash validity, chain linkage to previous receipt, and schema completeness against the canonical production ledger. Returns NOT FOUND for unknown IDs — never synthesizes a result.",
-      "required_scopes": ["read"],
+      "description": "Verify the cryptographic integrity of a ProofLink receipt. Checks hash validity, chain linkage to previous receipt, and schema completeness against the canonical production ledger. Returns NOT FOUND for unknown IDs \u2014 never synthesizes a result.",
+      "required_scopes": [
+        "read"
+      ],
       "tier": "read_only",
       "prooflink_receipt_generated": true,
-      "nist_controls": ["AU-9", "AU-10", "SI-7"],
+      "nist_controls": [
+        "AU-9",
+        "AU-10",
+        "SI-7"
+      ],
       "input_schema": {
         "type": "object",
-        "required": ["receipt_id"],
+        "required": [
+          "receipt_id"
+        ],
         "properties": {
           "receipt_id": {
             "type": "string",
@@ -31,22 +39,64 @@
       "output_schema": {
         "type": "object",
         "properties": {
-          "found": {"type": "boolean"},
-          "verification_result": {"type": "string", "enum": ["VERIFIED", "TAMPERED", "RECEIPT_NOT_FOUND"]},
-          "receipt_id": {"type": "string"},
-          "timestamp": {"type": "string", "format": "date-time"},
-          "category": {"type": "string"},
-          "actor": {"type": "string"},
-          "subject": {"type": "string"},
-          "hash_sha256": {"type": "string"},
-          "prev_hash": {"type": "string"},
-          "chain_intact": {"type": "boolean"},
-          "tamper_detected": {"type": "boolean"},
-          "auto_resolved": {"type": "boolean"},
-          "human_intervention": {"type": "boolean"},
-          "recovery_time_seconds": {"type": "number"},
-          "nist_controls": {"type": "array", "items": {"type": "string"}},
-          "verify_url": {"type": "string", "format": "uri"}
+          "found": {
+            "type": "boolean"
+          },
+          "verification_result": {
+            "type": "string",
+            "enum": [
+              "VERIFIED",
+              "TAMPERED",
+              "RECEIPT_NOT_FOUND"
+            ]
+          },
+          "receipt_id": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "category": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "hash_sha256": {
+            "type": "string"
+          },
+          "prev_hash": {
+            "type": "string"
+          },
+          "chain_intact": {
+            "type": "boolean"
+          },
+          "tamper_detected": {
+            "type": "boolean"
+          },
+          "auto_resolved": {
+            "type": "boolean"
+          },
+          "human_intervention": {
+            "type": "boolean"
+          },
+          "recovery_time_seconds": {
+            "type": "number"
+          },
+          "nist_controls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "verify_url": {
+            "type": "string",
+            "format": "uri"
+          }
         }
       }
     },
@@ -54,10 +104,15 @@
       "name": "get_receipt_chain",
       "display_name": "Get Receipt Chain",
       "description": "Fetch and verify the complete ProofLink receipt chain from the canonical production ledger. Returns real receipt count, chain break count, and the N most recent entries with full cryptographic metadata.",
-      "required_scopes": ["read"],
+      "required_scopes": [
+        "read"
+      ],
       "tier": "read_only",
       "prooflink_receipt_generated": true,
-      "nist_controls": ["AU-9", "AU-10"],
+      "nist_controls": [
+        "AU-9",
+        "AU-10"
+      ],
       "input_schema": {
         "type": "object",
         "properties": {
@@ -71,20 +126,42 @@
           "category": {
             "type": "string",
             "description": "Filter by receipt category",
-            "enum": ["self_healing", "platform_fix", "wazuh_alert", "platform_health_check", "all"]
+            "enum": [
+              "self_healing",
+              "platform_fix",
+              "wazuh_alert",
+              "platform_health_check",
+              "all"
+            ]
           }
         }
       },
       "output_schema": {
         "type": "object",
         "properties": {
-          "total_receipts": {"type": "integer"},
-          "chain_valid": {"type": "boolean"},
-          "chain_breaks": {"type": "integer"},
-          "chain_start": {"type": "string", "format": "date-time"},
-          "latest_timestamp": {"type": "string", "format": "date-time"},
-          "status": {"type": "string"},
-          "receipts": {"type": "array"}
+          "total_receipts": {
+            "type": "integer"
+          },
+          "chain_valid": {
+            "type": "boolean"
+          },
+          "chain_breaks": {
+            "type": "integer"
+          },
+          "chain_start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "latest_timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          },
+          "receipts": {
+            "type": "array"
+          }
         }
       }
     },
@@ -92,10 +169,15 @@
       "name": "query_uaio_status",
       "display_name": "Query UAIO Platform Status",
       "description": "Real-time platform health metrics. Container count via live docker ps, receipt count from canonical ledger, NIST CSF and HIPAA compliance scores. No hardcoded values.",
-      "required_scopes": ["read"],
+      "required_scopes": [
+        "read"
+      ],
       "tier": "read_only",
       "prooflink_receipt_generated": true,
-      "nist_controls": ["CA-7", "SI-4"],
+      "nist_controls": [
+        "CA-7",
+        "SI-4"
+      ],
       "input_schema": {
         "type": "object",
         "properties": {}
@@ -106,26 +188,46 @@
           "containers": {
             "type": "object",
             "properties": {
-              "healthy": {"type": "integer"},
-              "total": {"type": "integer"},
-              "health_pct": {"type": "number"}
+              "healthy": {
+                "type": "integer"
+              },
+              "total": {
+                "type": "integer"
+              },
+              "health_pct": {
+                "type": "number"
+              }
             }
           },
           "prooflink": {
             "type": "object",
             "properties": {
-              "receipts_generated": {"type": "integer"},
-              "chain_breaks": {"type": "integer"},
-              "chain_status": {"type": "string"},
-              "last_receipt_timestamp": {"type": "string"}
+              "receipts_generated": {
+                "type": "integer"
+              },
+              "chain_breaks": {
+                "type": "integer"
+              },
+              "chain_status": {
+                "type": "string"
+              },
+              "last_receipt_timestamp": {
+                "type": "string"
+              }
             }
           },
           "compliance": {
             "type": "object",
             "properties": {
-              "nist_csf_score": {"type": "number"},
-              "hipaa_compliant": {"type": "boolean"},
-              "fedramp_pathway": {"type": "string"}
+              "nist_csf_score": {
+                "type": "number"
+              },
+              "hipaa_compliant": {
+                "type": "boolean"
+              },
+              "fedramp_pathway": {
+                "type": "string"
+              }
             }
           }
         }
@@ -135,13 +237,21 @@
       "name": "get_incident_details",
       "display_name": "Get Incident Details",
       "description": "Fetch details of a specific autonomous remediation incident from the canonical ProofLink ledger. Returns the actual ledger entry with before/after state, remediation actions, timing, and receipt ID. Returns NOT FOUND for unknown IDs.",
-      "required_scopes": ["read"],
+      "required_scopes": [
+        "read"
+      ],
       "tier": "read_only",
       "prooflink_receipt_generated": true,
-      "nist_controls": ["IR-4", "IR-5", "AU-9"],
+      "nist_controls": [
+        "IR-4",
+        "IR-5",
+        "AU-9"
+      ],
       "input_schema": {
         "type": "object",
-        "required": ["incident_id"],
+        "required": [
+          "incident_id"
+        ],
         "properties": {
           "incident_id": {
             "type": "string",
@@ -152,32 +262,68 @@
       "output_schema": {
         "type": "object",
         "properties": {
-          "found": {"type": "boolean"},
-          "incident_id": {"type": "string"},
-          "timestamp": {"type": "string", "format": "date-time"},
-          "category": {"type": "string"},
-          "subject": {"type": "string"},
-          "action": {"type": "string"},
-          "outcome": {"type": "string"},
-          "detection_time_seconds": {"type": "number"},
-          "recovery_time_seconds": {"type": "number"},
-          "auto_resolved": {"type": "boolean"},
-          "human_intervention": {"type": "boolean"},
-          "playbook": {"type": "string"},
-          "prooflink_receipt_id": {"type": "string"},
-          "verify_url": {"type": "string"},
-          "nist_controls": {"type": "array"}
+          "found": {
+            "type": "boolean"
+          },
+          "incident_id": {
+            "type": "string"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "category": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "detection_time_seconds": {
+            "type": "number"
+          },
+          "recovery_time_seconds": {
+            "type": "number"
+          },
+          "auto_resolved": {
+            "type": "boolean"
+          },
+          "human_intervention": {
+            "type": "boolean"
+          },
+          "playbook": {
+            "type": "string"
+          },
+          "prooflink_receipt_id": {
+            "type": "string"
+          },
+          "verify_url": {
+            "type": "string"
+          },
+          "nist_controls": {
+            "type": "array"
+          }
         }
       }
     },
     {
       "name": "list_recent_incidents",
       "display_name": "List Recent Incidents",
-      "description": "Returns chronological list of recent autonomous remediation incidents from the canonical ProofLink ledger. All entries are real — no generated or synthetic data.",
-      "required_scopes": ["read"],
+      "description": "Returns chronological list of recent autonomous remediation incidents from the canonical ProofLink ledger. All entries are real \u2014 no generated or synthetic data.",
+      "required_scopes": [
+        "read"
+      ],
       "tier": "read_only",
       "prooflink_receipt_generated": true,
-      "nist_controls": ["IR-5", "AU-6"],
+      "nist_controls": [
+        "IR-5",
+        "AU-6"
+      ],
       "input_schema": {
         "type": "object",
         "properties": {
@@ -189,7 +335,12 @@
           },
           "category": {
             "type": "string",
-            "enum": ["self_healing", "platform_fix", "wazuh_alert", "all"],
+            "enum": [
+              "self_healing",
+              "platform_fix",
+              "wazuh_alert",
+              "all"
+            ],
             "default": "all"
           }
         }
@@ -197,23 +348,47 @@
       "output_schema": {
         "type": "object",
         "properties": {
-          "total": {"type": "integer"},
+          "total": {
+            "type": "integer"
+          },
           "incidents": {
             "type": "array",
             "items": {
               "type": "object",
               "properties": {
-                "incident_id": {"type": "string"},
-                "timestamp": {"type": "string"},
-                "category": {"type": "string"},
-                "subject": {"type": "string"},
-                "action": {"type": "string"},
-                "outcome": {"type": "string"},
-                "auto_resolved": {"type": "boolean"},
-                "detection_time_seconds": {"type": "number"},
-                "recovery_time_seconds": {"type": "number"},
-                "prooflink_receipt_id": {"type": "string"},
-                "verify_url": {"type": "string"}
+                "incident_id": {
+                  "type": "string"
+                },
+                "timestamp": {
+                  "type": "string"
+                },
+                "category": {
+                  "type": "string"
+                },
+                "subject": {
+                  "type": "string"
+                },
+                "action": {
+                  "type": "string"
+                },
+                "outcome": {
+                  "type": "string"
+                },
+                "auto_resolved": {
+                  "type": "boolean"
+                },
+                "detection_time_seconds": {
+                  "type": "number"
+                },
+                "recovery_time_seconds": {
+                  "type": "number"
+                },
+                "prooflink_receipt_id": {
+                  "type": "string"
+                },
+                "verify_url": {
+                  "type": "string"
+                }
               }
             }
           }
@@ -223,11 +398,18 @@
     {
       "name": "simulate_infrastructure_attack",
       "display_name": "Simulate Infrastructure Attack",
-      "description": "Trigger a real infrastructure attack simulation against an isolated sandbox container via the Break-It API. The platform autonomously detects, remediates, and generates a real ProofLink receipt from the canonical ledger. Returns actual timing and receipt — nothing is synthesized.",
-      "required_scopes": ["execute:limited"],
+      "description": "Trigger a real infrastructure attack simulation against an isolated sandbox container via the Break-It API. The platform autonomously detects, remediates, and generates a real ProofLink receipt from the canonical ledger. Returns actual timing and receipt \u2014 nothing is synthesized.",
+      "required_scopes": [
+        "execute:limited"
+      ],
       "tier": "remediation",
       "prooflink_receipt_generated": true,
-      "nist_controls": ["CA-8", "CP-4", "SI-6", "IR-3"],
+      "nist_controls": [
+        "CA-8",
+        "CP-4",
+        "SI-6",
+        "IR-3"
+      ],
       "rate_limit": "10 per hour per caller",
       "arbiter_required": true,
       "digital_twin_required": true,
@@ -237,7 +419,12 @@
           "attack_type": {
             "type": "string",
             "description": "Type of attack to simulate",
-            "enum": ["oomkilled", "crashloopbackoff", "network_timeout", "disk_pressure"],
+            "enum": [
+              "oomkilled",
+              "crashloopbackoff",
+              "network_timeout",
+              "disk_pressure"
+            ],
             "default": "oomkilled"
           },
           "target": {
@@ -250,17 +437,486 @@
       "output_schema": {
         "type": "object",
         "properties": {
-          "run_id": {"type": "string"},
-          "status": {"type": "string"},
-          "real_execution": {"type": "boolean"},
-          "detection_time_seconds": {"type": "number"},
-          "recovery_time_seconds": {"type": "number"},
-          "auto_resolved": {"type": "boolean"},
-          "human_intervention": {"type": "boolean"},
-          "receipt_id": {"type": "string"},
-          "verify_url": {"type": "string"},
-          "chain_position": {"type": "integer"},
-          "message": {"type": "string"}
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "real_execution": {
+            "type": "boolean"
+          },
+          "detection_time_seconds": {
+            "type": "number"
+          },
+          "recovery_time_seconds": {
+            "type": "number"
+          },
+          "auto_resolved": {
+            "type": "boolean"
+          },
+          "human_intervention": {
+            "type": "boolean"
+          },
+          "receipt_id": {
+            "type": "string"
+          },
+          "verify_url": {
+            "type": "string"
+          },
+          "chain_position": {
+            "type": "integer"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_platform_briefing",
+      "display_name": "Get Platform Briefing",
+      "description": "Full real-time health snapshot of the iTechSmart platform: 18 service statuses (systemd + Docker), SIE security queue totals, disk usage, uptime, receipts count, gate state, and next SIE scan time.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "SI-4",
+        "CA-7"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "services": {
+            "type": "object",
+            "description": "Map of service name to status"
+          },
+          "docker_containers": {
+            "type": "number"
+          },
+          "queue": {
+            "type": "object"
+          },
+          "disk": {
+            "type": "object"
+          },
+          "uptime": {
+            "type": "string"
+          },
+          "receipts": {
+            "type": "object"
+          },
+          "gate_live": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_sie_queue",
+      "display_name": "Get SIE Security Queue",
+      "description": "Retrieve pending SIE security findings awaiting approval. Filterable by detector type, fix class, and severity.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "SI-2",
+        "CA-5",
+        "RA-5"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "detector": {
+            "type": "string"
+          },
+          "fix_class": {
+            "type": "string",
+            "enum": [
+              "safe_auto",
+              "needs_approval",
+              "flag_only"
+            ]
+          },
+          "severity_max": {
+            "type": "number"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "total_in_queue": {
+            "type": "number"
+          },
+          "filtered_count": {
+            "type": "number"
+          },
+          "items": {
+            "type": "array"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_compliance_status",
+      "display_name": "Get Compliance Status",
+      "description": "Live compliance scores: NIST CSF, HIPAA, SOC 2 Type II with per-control evidence and gap analysis.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "CA-2",
+        "CA-7",
+        "AU-6"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "scores": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    {
+      "name": "dispatch_ag2_incident",
+      "display_name": "Dispatch AG2 Incident",
+      "description": "Send an IT incident to the 6-agent AG2 GroupChat for autonomous diagnosis and remediation planning. SEMI_AUTO mode: plan returned for human review before execution.",
+      "required_scopes": [
+        "invoke"
+      ],
+      "tier": "execute",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "IR-4",
+        "IR-5",
+        "IR-6",
+        "AU-10"
+      ],
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "description",
+          "service"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "incident_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "mttr_seconds": {
+            "type": "number"
+          },
+          "agents_participated": {
+            "type": "array"
+          },
+          "receipts": {
+            "type": "array"
+          },
+          "summary": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "search_platform_logs",
+      "display_name": "Search Platform Logs",
+      "description": "Search live journalctl logs for any iTechSmart systemd service by service name and optional grep/regex pattern.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "AU-2",
+        "AU-3",
+        "AU-12"
+      ],
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "service"
+        ],
+        "properties": {
+          "service": {
+            "type": "string"
+          },
+          "pattern": {
+            "type": "string"
+          },
+          "lines": {
+            "type": "number"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "service": {
+            "type": "string"
+          },
+          "total_fetched": {
+            "type": "number"
+          },
+          "matched": {
+            "type": "number"
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "approve_sie_finding",
+      "display_name": "Approve SIE Finding",
+      "description": "Approve a specific SIE security finding by queue index. Applies the fixer, seals a ProofLink receipt, removes item from queue. EXECUTE \u2014 modifies files on disk.",
+      "required_scopes": [
+        "write"
+      ],
+      "tier": "execute",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "CM-3",
+        "CM-6",
+        "AU-10",
+        "SI-2"
+      ],
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "index"
+        ],
+        "properties": {
+          "index": {
+            "type": "number",
+            "description": "Queue index from get_sie_queue"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "fix_result": {
+            "type": "object"
+          },
+          "receipt_id": {
+            "type": "string"
+          },
+          "remaining": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "trigger_sie_scan",
+      "display_name": "Trigger SIE Scan",
+      "description": "Kick off a fresh SIE platform scan. dry-run detects only; apply fixes safe_auto items and seals receipts. Background job \u2014 check get_platform_briefing ~2 min later.",
+      "required_scopes": [
+        "invoke"
+      ],
+      "tier": "execute",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "CA-7",
+        "RA-5",
+        "SI-2",
+        "SI-4"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "dry-run",
+              "apply"
+            ],
+            "description": "Scan mode (default: dry-run)"
+          },
+          "use_llm": {
+            "type": "boolean",
+            "description": "Use Nemotron for ranking (default: true)"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "started": {
+            "type": "boolean"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_iself_journal",
+      "display_name": "Get iSELF Healing Journal",
+      "description": "Retrieve iSELF self-healing history: what failed, root cause diagnosis, patch applied (systemctl restart / config fix), success/failure, and confidence score per event.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "AU-2",
+        "AU-3",
+        "IR-4",
+        "SI-4"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "number",
+            "description": "Most-recent entries to return (default 20, max 100)"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "ts": {
+                  "type": "number"
+                },
+                "service": {
+                  "type": "string"
+                },
+                "action": {
+                  "type": "string"
+                },
+                "root_cause": {
+                  "type": "string"
+                },
+                "patch_applied": {
+                  "type": "string"
+                },
+                "patch_success": {
+                  "type": "boolean"
+                },
+                "confidence": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "brain_query",
+      "display_name": "Query Agent Brain",
+      "description": "Search the iTechSmart 5-layer Agent Brain (L1 .md files, L2 Wiki, L3 Letta vector, L4 Knowledge Graph). Returns context, related agents, and knowledge graph connections.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query"
+          },
+          "layers": {
+            "type": "string",
+            "description": "Comma-separated layers to search: md,wiki,vector,graph (default: all)"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Max results per layer (default: 10)"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    {
+      "name": "cluster_status",
+      "display_name": "Get Cluster Status",
+      "description": "Returns the current multi-regional cluster topology \u2014 registered sites, heartbeat timestamps, and inter-site latency. Use this to check cluster health before cross-site operations.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "include_peers": {
+            "type": "boolean",
+            "description": "Include peer site details (default: true)"
+          }
+        }
+      }
+    },
+    {
+      "name": "port_registry",
+      "display_name": "Query Port Registry",
+      "description": "Query or check the iTechSmart port registry to avoid port conflicts. Lists all registered ports with service name and owner. Use before assigning a new port.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Action: list, check, or register (default: list)"
+          },
+          "port": {
+            "type": "integer",
+            "description": "Port number to check or register"
+          },
+          "service": {
+            "type": "string",
+            "description": "Service name when registering a port"
+          }
         }
       }
     }

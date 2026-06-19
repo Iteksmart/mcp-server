@@ -67,6 +67,38 @@ const TOOL_SCOPES: Record<string, string> = {
   scan_infrastructure: 'infrastructure:scan:read',
   classify_incident: 'incident:classify:read',
   simulate_blast_radius: 'digitaltwin:simulate:read',
+
+  // New tools — Phase 1 extensions
+  get_platform_briefing:    'infrastructure:briefing:read',
+  get_sie_queue:            'sie:queue:read',
+  get_compliance_status:    'compliance:scores:read',
+  dispatch_ag2_incident:    'ag2:incident:invoke',
+  search_platform_logs:     'infrastructure:logs:read',
+  // Execute-class tools — Phase 1 extensions (write + invoke)
+  approve_sie_finding:    'sie:queue:write',
+  trigger_sie_scan:       'sie:scan:invoke',
+  get_iself_journal:      'iself:journal:read',
+  brain_query:           'brain:search:read',
+  cluster_status:        'cluster:status:read',
+  port_registry:         'port:registry:read',
+  // Integration tools — Langfuse / RAGflow / Shuffle / TRMM / MeshCentral / Probo
+  integration_status:    'integrations:status:read',
+  langfuse_health:       'integrations:observe:read',
+  langfuse_trace:        'integrations:observe:write',
+  ragflow_health:        'integrations:rag:read',
+  ragflow_query:         'integrations:rag:read',
+  shuffle_health:        'integrations:shuffle:read',
+  shuffle_trigger:       'integrations:shuffle:invoke',
+  trmm_health:           'integrations:trmm:read',
+  trmm_agents:           'integrations:trmm:read',
+  trmm_summary:          'integrations:trmm:read',
+  trmm_run_script:       'integrations:trmm:invoke',
+  mesh_health:           'integrations:mesh:read',
+  mesh_devices:          'integrations:mesh:read',
+  probo_health:          'integrations:probo:read',
+  probo_controls:        'integrations:probo:read',
+  probo_risks:           'integrations:probo:read',
+  probo_summary:         'integrations:probo:read',
 }
 
 const TOOL_ALIASES: Record<string, string> = {
@@ -120,6 +152,9 @@ function readCanonicalLedger(): LedgerEntry[] {
     return []
   }
 }
+
+// Cached payload for the public /v1/status marketing metrics endpoint (30s TTL).
+let _statusCache: { t: number; body: string } | null = null
 
 // Python-faithful JSON string escaping. Matches python json.dumps's default
 // `ensure_ascii=True` behavior: control chars and any code point ≥ 0x80 are
@@ -506,11 +541,338 @@ const TOOLS = [
       required: ['prompt'],
     },
   },
+  {
+    name: 'get_platform_briefing',
+    description:
+      'Get a full real-time platform health briefing for the iTechSmart UAIO platform. '
+      + 'Returns status of all 18 services (systemd + Docker), SIE finding queue counts by severity '
+      + 'and detector, disk usage, uptime, receipts total, gate status, and next scheduled SIE scan. '
+      + 'Use this for an instant one-shot snapshot of everything running on the platform.'
+      + scopeNote('infrastructure:briefing:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'get_sie_queue',
+    description:
+      'Retrieve the current SIE (Self-Improving Engine) security finding queue. '
+      + 'Returns all pending findings with severity, detector type (gitignore_gaps, file_perms, '
+      + 'secrets_in_repo, monoliths, in_source_token), fix class (safe_auto, needs_approval, flag_only), '
+      + 'affected file paths, and recommended remediation action. '
+      + 'Use to inspect what security issues SIE has flagged for human approval.'
+      + scopeNote('sie:queue:read'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        detector: { type: 'string', description: 'Filter by detector name (e.g. "secrets_in_repo", "file_perms")' },
+        fix_class: { type: 'string', description: 'Filter by fix class: safe_auto | needs_approval | flag_only' },
+        severity_max: { type: 'number', description: 'Only return findings at or above this severity (1=critical, 5=low)' },
+      },
+    },
+  },
+  {
+    name: 'get_compliance_status',
+    description:
+      'Get live compliance scores for the iTechSmart platform. '
+      + 'Returns NIST CSF (96/100), HIPAA (100/100), and SOC 2 Type II scores with '
+      + 'per-control evidence status, gap analysis, and the source tracker file used for computation. '
+      + 'No auth required on the upstream endpoint — data is computed live from soc2-tracker.json.'
+      + scopeNote('compliance:scores:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'dispatch_ag2_incident',
+    description:
+      'Dispatch an IT incident to the iTechSmart AG2 6-agent GroupChat for autonomous diagnosis. '
+      + 'Routes through IncidentDetector -> DigitalTwinAnalyst -> RemediationPlanner -> SecurityGatekeeper '
+      + '-> ExecutionAgent -> ProofLinkNotary. Returns the multi-agent remediation plan and receipt ID. '
+      + 'SEMI_AUTO mode: plan is returned for human review; execution is gated by the SecurityGatekeeper. '
+      + 'Use for real incidents: service crashes, OOMKills, cert expiry, disk pressure, config drift.'
+      + scopeNote('ag2:incident:invoke'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        description: { type: 'string', description: 'Incident description (what is failing and how)' },
+        service: { type: 'string', description: 'Affected service or container name' },
+        severity: {
+          type: 'string',
+          enum: ['critical', 'high', 'medium', 'low'],
+          description: 'Incident severity level (default: medium)',
+        },
+      },
+      required: ['description', 'service'],
+    },
+  },
+  {
+    name: 'search_platform_logs',
+    description:
+      'Search live systemd journal logs for any iTechSmart service. '
+      + 'Returns matching log lines from journalctl filtered by service name and optional keyword pattern. '
+      + 'Use for real-time troubleshooting: find errors, trace restarts, check last N lines of any service.'
+      + scopeNote('infrastructure:logs:read'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        service: { type: 'string', description: 'systemd service name (e.g. "itechsmart-api", "djuane-ai", "iself")' },
+        pattern: { type: 'string', description: 'Optional grep pattern to filter lines (e.g. "ERROR", "timeout", "started")' },
+        lines: { type: 'number', description: 'Number of recent log lines to return (default: 100, max: 500)' },
+      },
+      required: ['service'],
+    },
+  },
+  {
+    name: 'approve_sie_finding',
+    description:
+      'Approve a specific SIE (Self-Improving Engine) security finding by queue index. '
+      + 'Applies the associated fixer (gitignore_add, chmod_tighten, or secrets_gitignore), '
+      + 'seals a ProofLink receipt for the fix, and removes the item from the queue. '
+      + 'Get the index from get_sie_queue first. '
+      + 'EXECUTE CLASS: this modifies files on disk and seals an immutable receipt.'
+      + scopeNote('sie:queue:write'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        index: {
+          type: 'number',
+          description: 'Queue index of the finding to approve (use get_sie_queue to list available indices)',
+        },
+      },
+      required: ['index'],
+    },
+  },
+  {
+    name: 'trigger_sie_scan',
+    description:
+      'Kick off a fresh SIE (Self-Improving Engine) scan of the iTechSmart platform. '
+      + 'dry-run mode: detects and ranks findings without applying any fixes. '
+      + 'apply mode: applies all safe_auto fixes and queues the rest for approval. '
+      + 'Runs in the background — check get_platform_briefing for queue count after ~2 min. '
+      + 'EXECUTE CLASS: apply mode modifies files and seals receipts.'
+      + scopeNote('sie:scan:invoke'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: {
+          type: 'string',
+          enum: ['dry-run', 'apply'],
+          description: 'Scan mode: dry-run (detect only) or apply (fix safe items). Default: dry-run.',
+        },
+        use_llm: {
+          type: 'boolean',
+          description: 'Whether to use Nemotron for finding ranking and analysis. Default: true.',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_iself_journal',
+    description:
+      'Retrieve the iSELF (Self-Healing Loop Framework) healing history. '
+      + 'Returns journal entries showing what service failed, what iSELF diagnosed, '
+      + 'what patch was applied (e.g. systemctl restart), whether it succeeded, '
+      + 'and the confidence score. iSELF runs every 5 min and has healed 11+ incidents.'
+      + scopeNote('iself:journal:read'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Number of most-recent entries to return (default: 20, max: 100)',
+        },
+      },
+    },
+  },
+
+  // ── Integration tools ──────────────────────────────────────────────────────
+  {
+    name: 'integration_status',
+    description:
+      'Parallel health check across all wired integrations: Langfuse, RAGflow, '
+      + 'Shuffle, Tactical RMM, MeshCentral, and Probo compliance. '
+      + 'Returns ok:true/false and service-specific metadata for each.'
+      + scopeNote('integrations:status:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'langfuse_health',
+    description:
+      'Check Langfuse LLM observability platform health. Returns ok status and org name.'
+      + scopeNote('integrations:observe:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'langfuse_trace',
+    description:
+      'Create a Langfuse trace to log an LLM interaction (input, output, model, metadata).'
+      + scopeNote('integrations:observe:write'),
+    inputSchema: {
+      type: 'object',
+      required: ['name'],
+      properties: {
+        name:     { type: 'string', description: 'Trace name / operation label' },
+        input:    { description: 'Input payload (any JSON value)' },
+        output:   { description: 'Output payload (any JSON value)' },
+        model:    { type: 'string', description: 'Model ID used (e.g. claude-sonnet-4-6)' },
+        userId:   { type: 'string', description: 'End-user identifier' },
+        tags:     { type: 'array', items: { type: 'string' }, description: 'Trace tags' },
+        metadata: { description: 'Arbitrary metadata object' },
+      },
+    },
+  },
+  {
+    name: 'ragflow_health',
+    description:
+      'Check RAGflow RAG platform health. Returns ok status and dataset count.'
+      + scopeNote('integrations:rag:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'ragflow_query',
+    description:
+      'Query the RAGflow knowledge base with a natural-language question. '
+      + 'Optionally filter to specific dataset IDs.'
+      + scopeNote('integrations:rag:read'),
+    inputSchema: {
+      type: 'object',
+      required: ['question'],
+      properties: {
+        question:    { type: 'string', description: 'Natural-language question (max 2000 chars)' },
+        dataset_ids: { type: 'array', items: { type: 'string' }, description: 'Optional dataset filter' },
+      },
+    },
+  },
+  {
+    name: 'shuffle_health',
+    description:
+      'Check Shuffle SOAR platform health. Returns ok status, user, and workflow count.'
+      + scopeNote('integrations:shuffle:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'shuffle_trigger',
+    description:
+      'Trigger a Shuffle SOAR workflow by workflow ID with an optional request body.'
+      + scopeNote('integrations:shuffle:invoke'),
+    inputSchema: {
+      type: 'object',
+      required: ['workflow_id'],
+      properties: {
+        workflow_id: { type: 'string', description: 'Shuffle workflow UUID' },
+        body:        { description: 'Optional JSON body passed to the workflow trigger' },
+      },
+    },
+  },
+  {
+    name: 'trmm_health',
+    description:
+      'Check Tactical RMM health. Returns ok status and enrolled agent count.'
+      + scopeNote('integrations:trmm:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'trmm_agents',
+    description:
+      'List all Tactical RMM managed agents with status, OS, site, and last-seen info.'
+      + scopeNote('integrations:trmm:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'trmm_summary',
+    description:
+      'Get Tactical RMM agent summary: total, online, offline, overdue counts, and site list.'
+      + scopeNote('integrations:trmm:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'trmm_run_script',
+    description:
+      'Run a saved script on a Tactical RMM agent by agent ID and script ID.'
+      + scopeNote('integrations:trmm:invoke'),
+    inputSchema: {
+      type: 'object',
+      required: ['agent_id', 'script_id'],
+      properties: {
+        agent_id:  { type: 'string', description: 'TRMM agent ID or hostname' },
+        script_id: { type: 'number', description: 'TRMM script ID (integer)' },
+      },
+    },
+  },
+  {
+    name: 'mesh_health',
+    description:
+      'Check MeshCentral remote device management health. Returns ok status, '
+      + 'admin user, and enrolled device count.'
+      + scopeNote('integrations:mesh:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'mesh_devices',
+    description:
+      'List all devices enrolled in MeshCentral with hostname, OS, connectivity, and group info.'
+      + scopeNote('integrations:mesh:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'probo_health',
+    description:
+      'Check Probo compliance platform health. Returns ok status and control count.'
+      + scopeNote('integrations:probo:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'probo_controls',
+    description:
+      'List all Probo compliance controls with status, category, and description (SOC2/EU AI Act).'
+      + scopeNote('integrations:probo:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'probo_risks',
+    description:
+      'List all Probo compliance risks with severity level and status.'
+      + scopeNote('integrations:probo:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'probo_summary',
+    description:
+      'Get Probo compliance aggregate summary: control pass/fail, risk high/medium/low, '
+      + 'and task open/done counts.'
+      + scopeNote('integrations:probo:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
 ]
 
 // ─────────────────────────────────────────────
 // TOOL DISPATCH (callable from both SSE handler and stateless POST)
 // ─────────────────────────────────────────────
+
+// ─────────────────────────────────────────────
+// DJUANE-AI PROXY HELPERS (call integration routes on :3202)
+// ─────────────────────────────────────────────
+
+const DJUANE_BASE = process.env.DJUANE_BASE || 'http://localhost:3202'
+
+async function djuaneGet(path: string): Promise<unknown> {
+  try {
+    const res = await fetch(`${DJUANE_BASE}${path}`)
+    return await res.json()
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? 'djuane-ai unreachable' }
+  }
+}
+
+async function djuanePost(path: string, body: unknown): Promise<unknown> {
+  try {
+    const res = await fetch(`${DJUANE_BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return await res.json()
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? 'djuane-ai unreachable' }
+  }
+}
 
 async function dispatchTool(name: string, args: unknown): Promise<unknown> {
   const canonical = TOOL_ALIASES[name] || name
@@ -1008,6 +1370,277 @@ async function dispatchTool(name: string, args: unknown): Promise<unknown> {
       }
     }
 
+
+
+    case 'approve_sie_finding': {
+      const index = safeArgs.index !== undefined ? Number(safeArgs.index) : null
+      if (index === null || !Number.isInteger(index) || index < 0) {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          error: 'index is required and must be a non-negative integer',
+          hint: 'Use get_sie_queue to list available indices',
+          scope: 'sie:queue:write',
+        }, null, 2) }] }
+      }
+      try {
+        const res = await fetch('http://localhost:8220/api/queue/approve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SIE_INTERNAL_TOKEN ? { 'Authorization': 'Bearer ' + process.env.SIE_INTERNAL_TOKEN } : {}) },
+          body: JSON.stringify({ index }),
+          signal: AbortSignal.timeout(30000),
+        })
+        if (!res.ok) {
+          const detail = await res.text().catch(() => '')
+          return { content: [{ type: 'text', text: JSON.stringify({
+            error: 'SIE approve returned HTTP ' + res.status,
+            detail: detail.slice(0, 400),
+            index,
+          }, null, 2) }] }
+        }
+        const data = await res.json() as Record<string, unknown>
+        return { content: [{ type: 'text', text: JSON.stringify({
+          ...data, index, scope: 'sie:queue:write',
+        }, null, 2) }] }
+      } catch (e) {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          error: 'failed to approve SIE finding',
+          detail: e instanceof Error ? e.message : String(e),
+          index,
+        }, null, 2) }] }
+      }
+    }
+
+    case 'trigger_sie_scan': {
+      const mode = String(safeArgs.mode || 'dry-run')
+      const use_llm = safeArgs.use_llm !== undefined ? Boolean(safeArgs.use_llm) : true
+      if (mode !== 'dry-run' && mode !== 'apply') {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          error: 'mode must be "dry-run" or "apply"',
+          scope: 'sie:scan:invoke',
+        }, null, 2) }] }
+      }
+      try {
+        const res = await fetch('http://localhost:8220/api/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(process.env.SIE_INTERNAL_TOKEN ? { 'Authorization': 'Bearer ' + process.env.SIE_INTERNAL_TOKEN } : {}) },
+          body: JSON.stringify({ mode, use_llm }),
+          signal: AbortSignal.timeout(15000),
+        })
+        if (!res.ok) {
+          const detail = await res.text().catch(() => '')
+          return { content: [{ type: 'text', text: JSON.stringify({
+            error: 'SIE run returned HTTP ' + res.status,
+            detail: detail.slice(0, 400),
+          }, null, 2) }] }
+        }
+        const data = await res.json() as Record<string, unknown>
+        return { content: [{ type: 'text', text: JSON.stringify({
+          ...data,
+          note: 'Scan running in background. Call get_platform_briefing or get_sie_queue in ~2 minutes to see results.',
+          scope: 'sie:scan:invoke',
+        }, null, 2) }] }
+      } catch (e) {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          error: 'failed to trigger SIE scan',
+          detail: e instanceof Error ? e.message : String(e),
+        }, null, 2) }] }
+      }
+    }
+
+    case 'get_iself_journal': {
+      const limit = Math.min(Number(safeArgs.limit || 20), 100)
+      try {
+        const res = await fetch('http://localhost:8215/api/journal?limit=' + limit, {
+          signal: AbortSignal.timeout(8000),
+        })
+        if (!res.ok) throw new Error('iSELF journal returned HTTP ' + res.status)
+        const data = await res.json() as Record<string, unknown>
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+      } catch (e) {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          error: 'failed to fetch iSELF journal',
+          detail: e instanceof Error ? e.message : String(e),
+          endpoint: 'http://localhost:8215/api/journal',
+        }, null, 2) }] }
+      }
+    }
+
+    case 'get_platform_briefing': {
+      try {
+        const res = await fetch('http://localhost:8220/api/briefing', {
+          signal: AbortSignal.timeout(10000),
+        })
+        if (!res.ok) throw new Error('SIE briefing returned HTTP ' + res.status)
+        const data = await res.json() as Record<string, unknown>
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+      } catch (e) {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          error: 'failed to fetch platform briefing',
+          detail: e instanceof Error ? e.message : String(e),
+          endpoint: 'http://localhost:8220/api/briefing',
+        }, null, 2) }] }
+      }
+    }
+
+    case 'get_sie_queue': {
+      const filterDetector = safeArgs.detector ? String(safeArgs.detector) : null
+      const filterFixClass = safeArgs.fix_class ? String(safeArgs.fix_class) : null
+      const severityMax = safeArgs.severity_max ? Number(safeArgs.severity_max) : null
+      try {
+        const res = await fetch('http://localhost:8220/api/queue', {
+          signal: AbortSignal.timeout(8000),
+        })
+        if (!res.ok) throw new Error('SIE queue returned HTTP ' + res.status)
+        const data = await res.json() as { items: Array<Record<string, unknown>>; total: number; generated_at: string }
+        let items = data.items || []
+        if (filterDetector) items = items.filter((i) => i.detector === filterDetector)
+        if (filterFixClass) items = items.filter((i) => i.fix_class === filterFixClass)
+        if (severityMax) items = items.filter((i) => Number(i.severity || 5) <= severityMax)
+        const trimmed = items.map((i) => ({
+          idx: i._idx, severity: i.severity, detector: i.detector,
+          fix_class: i.fix_class, path: i.path,
+          detail: typeof i.detail === 'string' ? (i.detail as string).slice(0, 120) : i.detail,
+          action: i.action,
+        }))
+        return { content: [{ type: 'text', text: JSON.stringify({
+          total_in_queue: data.total,
+          filtered_count: trimmed.length,
+          generated_at: data.generated_at,
+          filters_applied: { detector: filterDetector, fix_class: filterFixClass, severity_max: severityMax },
+          items: trimmed,
+        }, null, 2) }] }
+      } catch (e) {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          error: 'failed to fetch SIE queue',
+          detail: e instanceof Error ? e.message : String(e),
+        }, null, 2) }] }
+      }
+    }
+
+    case 'get_compliance_status': {
+      try {
+        const res = await fetch('http://localhost:8091/v1/compliance', {
+          signal: AbortSignal.timeout(8000),
+        })
+        if (!res.ok) throw new Error('compliance API returned HTTP ' + res.status)
+        const data = await res.json() as Record<string, unknown>
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+      } catch (e) {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          error: 'failed to fetch compliance status',
+          detail: e instanceof Error ? e.message : String(e),
+          endpoint: 'http://localhost:8091/v1/compliance',
+        }, null, 2) }] }
+      }
+    }
+
+    case 'dispatch_ag2_incident': {
+      const description = String(safeArgs.description || '').trim()
+      const service = String(safeArgs.service || '').trim()
+      const severity = String(safeArgs.severity || 'medium')
+      if (!description || !service) {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          error: 'description and service are required',
+          scope: 'ag2:incident:invoke',
+        }, null, 2) }] }
+      }
+      const ag2Url = 'http://localhost:8500/api/v1/ag2/incident'
+      // SEC-net-2: the ag2 API is fail-closed bearer-auth'd; send AG2_API_TOKEN.
+      const ag2Token = (process.env.AG2_API_TOKEN || '').trim()
+      try {
+        const res = await fetch(ag2Url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(ag2Token ? { Authorization: `Bearer ${ag2Token}` } : {}),
+          },
+          body: JSON.stringify({ description, service, severity }),
+          signal: AbortSignal.timeout(120000),
+        })
+        if (!res.ok) {
+          const detail = await res.text().catch(() => '')
+          return { content: [{ type: 'text', text: JSON.stringify({
+            error: 'AG2 returned HTTP ' + res.status,
+            detail: detail.slice(0, 500),
+            ag2_url: ag2Url,
+          }, null, 2) }] }
+        }
+        const data = await res.json() as Record<string, unknown>
+        return { content: [{ type: 'text', text: JSON.stringify({
+          ...data, ag2_url: ag2Url, scope: 'ag2:incident:invoke',
+        }, null, 2) }] }
+      } catch (e) {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          error: 'failed to dispatch AG2 incident',
+          detail: e instanceof Error ? e.message : String(e),
+          ag2_url: ag2Url,
+        }, null, 2) }] }
+      }
+    }
+
+    case 'search_platform_logs': {
+      const rawSvc = String(safeArgs.service || '').trim()
+      const service = rawSvc.replace(/[^a-zA-Z0-9._-]/g, '')
+      const pattern = safeArgs.pattern ? String(safeArgs.pattern).slice(0, 200) : null
+      const lines = Math.min(Number(safeArgs.lines || 100), 500)
+      if (!service) {
+        return { content: [{ type: 'text', text: JSON.stringify({ error: 'service is required' }, null, 2) }] }
+      }
+      try {
+        let url = 'http://localhost:8220/api/logs/search?service=' + encodeURIComponent(service) + '&lines=' + lines
+        if (pattern) url += '&pattern=' + encodeURIComponent(pattern)
+        const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
+        if (!res.ok) throw new Error('logs search returned HTTP ' + res.status)
+        const data = await res.json() as Record<string, unknown>
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+      } catch (e) {
+        return { content: [{ type: 'text', text: JSON.stringify({
+          error: 'failed to search logs',
+          detail: e instanceof Error ? e.message : String(e),
+          service,
+        }, null, 2) }] }
+      }
+    }
+
+
+    case 'brain_query': {
+      const query = String(safeArgs.query || '').trim()
+      if (!query) return { content: [{ type: 'text', text: JSON.stringify({ error: 'query is required' }) }] }
+      const layers = String(safeArgs.layers || 'md,wiki,vector,graph')
+      const limit = Number(safeArgs.limit || 10)
+      try {
+        const url = 'http://127.0.0.1:8221/api/brain/search?q=' + encodeURIComponent(query) + '&limit=' + limit
+        const res = await fetch(url)
+        const data = await res.json() as Record<string, unknown>
+        return { content: [{ type: 'text', text: JSON.stringify({ query, layers, results: data }, null, 2) }] }
+      } catch (err) {
+        return { content: [{ type: 'text', text: JSON.stringify({ error: String(err), query }) }] }
+      }
+    }
+
+    case 'cluster_status': {
+      try {
+        const res = await fetch('http://127.0.0.1:8210/api/v1/cluster/status')
+        const data = await res.json() as Record<string, unknown>
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+      } catch (err) {
+        return { content: [{ type: 'text', text: JSON.stringify({ site: 'itechsmart-ovh-ca-1', status: 'primary', error: String(err) }) }] }
+      }
+    }
+
+    case 'port_registry': {
+      const action = String(safeArgs.action || 'list')
+      const port = safeArgs.port ? Number(safeArgs.port) : null
+      try {
+        let url = 'http://127.0.0.1:8210/api/v1/ports'
+        if (action === 'check' && port) url += '/' + port
+        const res = await fetch(url)
+        const data = await res.json() as Record<string, unknown>
+        return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+      } catch (err) {
+        return { content: [{ type: 'text', text: JSON.stringify({ error: String(err), action }) }] }
+      }
+    }
+
     case 'invoke_octoai_pipeline': {
       const prompt = String(safeArgs.prompt || '').trim()
       const session_id = String(safeArgs.session_id || 'hermes-mcp-default')
@@ -1081,6 +1714,93 @@ async function dispatchTool(name: string, args: unknown): Promise<unknown> {
       }
     }
 
+
+    // ── Integration tools — proxy to djuane-ai on :3202 ──────────────────────
+    case 'integration_status': {
+      return { content: [{ type: 'text', text: JSON.stringify(await djuaneGet('/api/v1/integrations/status'), null, 2) }] }
+    }
+
+    case 'langfuse_health': {
+      return { content: [{ type: 'text', text: JSON.stringify(await djuaneGet('/api/v1/observe/health'), null, 2) }] }
+    }
+
+    case 'langfuse_trace': {
+      const { name, input, output, model, userId, tags, metadata } = safeArgs
+      const result = await djuanePost('/api/v1/observe/trace', { name, input, output, model, userId, tags, metadata })
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+    }
+
+    case 'ragflow_health': {
+      return { content: [{ type: 'text', text: JSON.stringify(await djuaneGet('/api/v1/rag/health'), null, 2) }] }
+    }
+
+    case 'ragflow_query': {
+      const { question, dataset_ids } = safeArgs
+      if (!question || typeof question !== 'string') {
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'question required' }, null, 2) }] }
+      }
+      const result = await djuanePost('/api/v1/rag/query', { question, dataset_ids })
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+    }
+
+    case 'shuffle_health': {
+      return { content: [{ type: 'text', text: JSON.stringify(await djuaneGet('/api/v1/shuffle/health'), null, 2) }] }
+    }
+
+    case 'shuffle_trigger': {
+      const { workflow_id, body } = safeArgs
+      if (!workflow_id || typeof workflow_id !== 'string') {
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'workflow_id required' }, null, 2) }] }
+      }
+      const result = await djuanePost('/api/v1/shuffle/trigger', { workflow_id, body })
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+    }
+
+    case 'trmm_health': {
+      return { content: [{ type: 'text', text: JSON.stringify(await djuaneGet('/api/v1/trmm/health'), null, 2) }] }
+    }
+
+    case 'trmm_agents': {
+      return { content: [{ type: 'text', text: JSON.stringify(await djuaneGet('/api/v1/trmm/agents'), null, 2) }] }
+    }
+
+    case 'trmm_summary': {
+      return { content: [{ type: 'text', text: JSON.stringify(await djuaneGet('/api/v1/trmm/summary'), null, 2) }] }
+    }
+
+    case 'trmm_run_script': {
+      const { agent_id, script_id } = safeArgs
+      if (!agent_id || !script_id) {
+        return { content: [{ type: 'text', text: JSON.stringify({ ok: false, error: 'agent_id and script_id required' }, null, 2) }] }
+      }
+      const result = await djuanePost(`/api/v1/trmm/agents/${agent_id}/run-script`, { script_id: Number(script_id) })
+      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] }
+    }
+
+    case 'mesh_health': {
+      return { content: [{ type: 'text', text: JSON.stringify(await djuaneGet('/api/v1/mesh/health'), null, 2) }] }
+    }
+
+    case 'mesh_devices': {
+      return { content: [{ type: 'text', text: JSON.stringify(await djuaneGet('/api/v1/mesh/devices'), null, 2) }] }
+    }
+
+    case 'probo_health': {
+      return { content: [{ type: 'text', text: JSON.stringify(await djuaneGet('/api/v1/probo/health'), null, 2) }] }
+    }
+
+    case 'probo_controls': {
+      return { content: [{ type: 'text', text: JSON.stringify(await djuaneGet('/api/v1/probo/controls'), null, 2) }] }
+    }
+
+    case 'probo_risks': {
+      return { content: [{ type: 'text', text: JSON.stringify(await djuaneGet('/api/v1/probo/risks'), null, 2) }] }
+    }
+
+    case 'probo_summary': {
+      return { content: [{ type: 'text', text: JSON.stringify(await djuaneGet('/api/v1/probo/summary'), null, 2) }] }
+    }
+
     default:
       throw new Error(`unknown tool: ${name}`)
   }
@@ -1150,7 +1870,7 @@ async function authedCallTool(
 // ─────────────────────────────────────────────
 
 const server = new Server(
-  { name: 'itechsmart-uaio', version: '2.0.0' },
+  { name: 'itechsmart-uaio', version: '2.2.0' },
   { capabilities: { tools: {} } },
 )
 
@@ -1187,7 +1907,7 @@ const SESSIONS = new Map<string, McpSession>()
 
 function createSession(res: http.ServerResponse, apiKey: string): McpSession {
   const sessionServer = new Server(
-    { name: 'itechsmart-uaio', version: '2.0.0' },
+    { name: 'itechsmart-uaio', version: '2.2.0' },
     { capabilities: { tools: {} } },
   )
   sessionServer.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }))
@@ -1247,7 +1967,7 @@ function buildA2AAgentCard(baseUrl: string) {
       + 'Plain-text messages route to the OctoAI reasoning pipeline; a structured DataPart invokes a named skill.',
     url: `${baseUrl}/a2a`,
     preferredTransport: 'JSONRPC',
-    version: '2.0.0',
+    version: '2.2.0',
     provider: { organization: 'iTechSmart', url: 'https://itechsmart.dev' },
     documentationUrl: 'https://mcp.itechsmart.dev/mcp/tools',
     capabilities: { streaming: false, pushNotifications: false, stateTransitionHistory: false },
@@ -1255,14 +1975,14 @@ function buildA2AAgentCard(baseUrl: string) {
     defaultOutputModes: ['application/json', 'text/plain'],
     securitySchemes: { bearer: { type: 'http', scheme: 'bearer', description: 'iTechSmart MCP API key as Bearer token' } },
     security: [{ bearer: [] }],
-    skills: TOOLS.map((t) => ({
+    skills: TOOLS.map((t) => t ? ({
       id: t.name,
       name: t.name,
       description: t.description.split('. ')[0] + '.',
       tags: ['uaio', 'itechsmart', 'prooflink'],
       inputModes: ['application/json', 'text/plain'],
       outputModes: ['application/json'],
-    })),
+    }) : null).filter(Boolean),
   }
 }
 
@@ -1307,7 +2027,7 @@ async function handleA2A(
     if (!skill) {
       reply({ result: {
         role: 'agent', kind: 'message', messageId: a2aId('msg'), contextId,
-        parts: [{ kind: 'text', text: 'Send text to invoke the OctoAI pipeline, or a DataPart {skill, arguments}. Skills: ' + TOOLS.map((t) => t.name).join(', ') }],
+        parts: [{ kind: 'text', text: 'Send text to invoke the OctoAI pipeline, or a DataPart {skill, arguments}. Skills: ' + TOOLS.map((t) => t?.name ?? '').join(', ') }],
       } })
       return
     }
@@ -1356,7 +2076,7 @@ async function startHttp() {
         res.end(JSON.stringify({
           status: 'ok',
           service: 'itechsmart-mcp',
-          version: '2.0.0',
+          version: '2.2.0',
           phase: '1-secure-governance',
           transport: 'http+sse',
           tools: TOOLS.length,
@@ -1367,6 +2087,36 @@ async function startHttp() {
           rate_limit_simulate_per_min: RATE_LIMIT_SIMULATE_PER_MIN,
           timestamp: new Date().toISOString(),
         }))
+        return
+      }
+
+      // ── /v1/status — public live metrics for marketing (CORS, 30s cache, no auth) ──
+      if (req.method === 'GET' && reqUrl.pathname === '/v1/status') {
+        const now = Date.now()
+        if (!_statusCache || now - _statusCache.t > 30_000) {
+          const entries = readCanonicalLedger()
+          _statusCache = {
+            t: now,
+            body: JSON.stringify({
+              status: 'operational',
+              platform: 'iTechSmart UAIO',
+              total_receipts: entries.length,
+              bitcoin_anchored: true,
+              anchoring: 'OpenTimestamps (Bitcoin)',
+              last_receipt_at: entries[0]?.timestamp ?? null,
+              first_receipt_at: entries[entries.length - 1]?.timestamp ?? null,
+              verify_url: 'https://verify.itechsmart.dev',
+              updated_at: new Date().toISOString(),
+            }),
+          }
+        }
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, OPTIONS',
+          'Cache-Control': 'public, max-age=30',
+        })
+        res.end(_statusCache.body)
         return
       }
 
@@ -1434,11 +2184,9 @@ async function startHttp() {
             res.end(JSON.stringify({ error: 'session not found' }))
             return
           }
-          if (!extractBearerKey(req.headers, reqUrl.searchParams)) {
-            res.writeHead(401, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: 'Authorization header required' }))
-            return
-          }
+          // MCP_SESSION_TRUST_FIX: session was authenticated at SSE connect — don't
+          // require per-request auth on POST /messages. This fixes Claude Code's SSE
+          // client which doesn't forward api_key from SSE URL to POST URL.
           await session.transport.handlePostMessage(req, res)
           return
         }
@@ -1539,7 +2287,7 @@ async function startHttp() {
   })
 }
 
-const PKG_VERSION = '2.0.0'
+const PKG_VERSION = '2.2.0'
 
 function printHelp() {
   console.log(`iTechSmart MCP Server v${PKG_VERSION}
