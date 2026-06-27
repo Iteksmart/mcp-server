@@ -14,7 +14,8 @@
   ],
   "scripts": {
     "build": "tsc && node -e \"require('fs').copyFileSync('src/tools.json','dist/tools.json');require('fs').chmodSync('dist/index.js',0o755)\"",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "test": "npm run build && node --test tests/*.test.mjs"
   },
   "keywords": [
     "mcp",

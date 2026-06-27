@@ -1661,6 +1661,169 @@
           }
         }
       }
+    },
+    {
+      "name": "prooflink.verify_chain",
+      "display_name": "ProofLink \u2014 Verify Chain",
+      "description": "Read-only audit scope for verifying the ProofLink receipt chain. Alias of get_receipt_chain.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "AU-2",
+        "AU-6",
+        "AU-12"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "container": {
+            "type": "string"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "prooflink.verify_receipt",
+      "display_name": "ProofLink \u2014 Verify Receipt",
+      "description": "Read-only audit scope for verifying a single ProofLink receipt by ID. Alias of verify_prooflink_receipt.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "AU-2",
+        "AU-6",
+        "AU-12"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "receipt_id": {
+            "type": "string"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "prooflink.search_receipts",
+      "display_name": "ProofLink \u2014 Search Receipts",
+      "description": "Read-only audit scope for searching recent ProofLink receipts for post-hoc reconstruction.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "AU-2",
+        "AU-6",
+        "AU-12"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "container": {
+            "type": "string"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "mission.list_incidents",
+      "display_name": "Mission \u2014 List Incidents",
+      "description": "Read-only mission scope for recent autonomous IT incidents.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "AU-2",
+        "AU-6",
+        "AU-12"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer"
+          },
+          "since": {
+            "type": "string"
+          }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "mission.cluster_health",
+      "display_name": "Mission \u2014 Cluster Health",
+      "description": "Read-only mission scope for cluster health.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "AU-2",
+        "AU-6",
+        "AU-12"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "compliance.audit_summary",
+      "display_name": "Compliance \u2014 Audit Summary",
+      "description": "Read-only compliance scope for CISO and auditor review.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "AU-2",
+        "AU-6",
+        "AU-12"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {}
+      }
     }
   ]
 }

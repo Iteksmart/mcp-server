@@ -39,9 +39,43 @@ import { execSync } from 'child_process'
 // SECURITY CONFIG (Phase 1)
 // ─────────────────────────────────────────────
 
-const RAW_KEYS = (process.env.ITECHSMART_MCP_API_KEYS || '')
-  .split(',').map(k => k.trim()).filter(Boolean)
-const VALID_API_KEYS = new Set(RAW_KEYS)
+type McpKeyScope = 'read' | 'admin'
+
+interface McpKeyRecord {
+  scopes: Set<McpKeyScope>
+  source: string
+}
+
+const API_KEYS = new Map<string, McpKeyRecord>()
+
+function loadApiKeys(raw: string, defaultScope: McpKeyScope, source: string): void {
+  raw.split(',')
+    .map(k => k.trim())
+    .filter(Boolean)
+    .forEach(entry => {
+      const parts = entry.split(':')
+      const key = (parts.shift() || '').trim()
+      const scope = (parts.join(':') || defaultScope).trim().toLowerCase()
+      if (!key) return
+      const scopes = new Set<McpKeyScope>(['read'])
+      if (scope === 'admin') scopes.add('admin')
+      const existing = API_KEYS.get(key)
+      if (existing) {
+        scopes.forEach(s => existing.scopes.add(s))
+        existing.source = `${existing.source},${source}`
+      } else {
+        API_KEYS.set(key, { scopes, source })
+      }
+    })
+}
+
+// New production key format: ITECHSMART_MCP_KEYS=read-key,admin-key:admin
+// Legacy ITECHSMART_MCP_API_KEYS remains supported as admin for backwards compatibility
+// with existing Cloudflare Access protected clients.
+loadApiKeys(process.env.ITECHSMART_MCP_KEYS || '', 'read', 'ITECHSMART_MCP_KEYS')
+loadApiKeys(process.env.ITECHSMART_MCP_API_KEYS || '', 'admin', 'ITECHSMART_MCP_API_KEYS')
+
+const VALID_API_KEYS = new Set(API_KEYS.keys())
 
 const SELF_REPORT_URL = process.env.SELF_REPORT_URL
   || 'http://localhost:3202/agent/self-report'
@@ -55,6 +89,12 @@ const TOOL_SCOPES: Record<string, string> = {
   // Canonical tool names
   verify_prooflink_receipt: 'prooflink:verify:read',
   get_receipt_chain: 'ledger:audit:read',
+  'prooflink.verify_chain': 'prooflink.verify_chain',
+  'prooflink.verify_receipt': 'prooflink.verify_receipt',
+  'prooflink.search_receipts': 'prooflink.search_receipts',
+  'mission.list_incidents': 'mission.list_incidents',
+  'mission.cluster_health': 'mission.cluster_health',
+  'compliance.audit_summary': 'compliance.audit_summary',
   query_uaio_status: 'infrastructure:scan:read',
   get_incident_details: 'incident:classify:read',
   list_recent_incidents: 'incident:classify:read',
@@ -104,6 +144,12 @@ const TOOL_SCOPES: Record<string, string> = {
 const TOOL_ALIASES: Record<string, string> = {
   verify_receipt: 'verify_prooflink_receipt',
   audit_trail: 'get_receipt_chain',
+  'prooflink.verify_chain': 'get_receipt_chain',
+  'prooflink.verify_receipt': 'verify_prooflink_receipt',
+  'prooflink.search_receipts': 'get_receipt_chain',
+  'mission.list_incidents': 'list_recent_incidents',
+  'mission.cluster_health': 'cluster_status',
+  'compliance.audit_summary': 'get_compliance_status',
   scan_infrastructure: 'query_uaio_status',
   classify_incident: 'get_incident_details',
   simulate_blast_radius: 'simulate_infrastructure_attack',
@@ -237,25 +283,102 @@ const INCIDENT_CATEGORIES = new Set([
 // AUTH HELPERS
 // ─────────────────────────────────────────────
 
+interface AuthContext {
+  ok: boolean
+  key: string | null
+  keyPrefix: string | null
+  keyProvided: boolean
+  source: 'x-itechsmart-mcp-key' | 'bearer' | 'query' | 'none'
+  scopes: Set<McpKeyScope>
+  admin: boolean
+  cloudflareAccess: boolean
+  reason?: string
+}
+
+function getHeaderValue(headers: http.IncomingHttpHeaders, name: string): string | null {
+  const value = headers[name.toLowerCase()]
+  if (Array.isArray(value)) return value[0] || null
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function extractApiKey(
+  headers: http.IncomingHttpHeaders,
+  query: URLSearchParams,
+): { key: string | null; source: AuthContext['source'] } {
+  const explicit = getHeaderValue(headers, 'x-itechsmart-mcp-key')
+  if (explicit) return { key: explicit, source: 'x-itechsmart-mcp-key' }
+
+  const auth = getHeaderValue(headers, 'authorization')
+  if (auth) {
+    const m = auth.match(/^Bearer\s+(.+)$/i)
+    if (m && m[1].trim()) return { key: m[1].trim(), source: 'bearer' }
+  }
+
+  const q = query.get('api_key')
+  if (q) return { key: q, source: 'query' }
+  return { key: null, source: 'none' }
+}
+
 function extractBearerKey(
   headers: http.IncomingHttpHeaders,
   query: URLSearchParams,
 ): string | null {
-  const auth = headers['authorization']
-  if (typeof auth === 'string') {
-    const m = auth.match(/^Bearer\s+(.+)$/i)
-    if (m) return m[1].trim()
-  }
-  const q = query.get('api_key')
-  return q || null
-}
-
-function isValidKey(key: string | null): boolean {
-  return !!key && VALID_API_KEYS.has(key)
+  return extractApiKey(headers, query).key
 }
 
 function keyPrefix(key: string): string {
-  return key.substring(0, 8)
+  return crypto.createHash('sha256').update(key).digest('hex').substring(0, 12)
+}
+
+function getAuthContext(headers: http.IncomingHttpHeaders, query: URLSearchParams): AuthContext {
+  const { key, source } = extractApiKey(headers, query)
+  const cloudflareAccess = Boolean(
+    getHeaderValue(headers, 'cf-access-authenticated-user-email')
+    || getHeaderValue(headers, 'cf-access-jwt-assertion')
+  )
+  const record = key ? API_KEYS.get(key) : undefined
+  return {
+    ok: Boolean(key && record),
+    key: key && record ? key : null,
+    keyPrefix: key && record ? keyPrefix(key) : null,
+    keyProvided: Boolean(key),
+    source,
+    scopes: record?.scopes || new Set<McpKeyScope>(),
+    admin: Boolean(record?.scopes.has('admin')),
+    cloudflareAccess,
+    reason: !key ? 'missing_key' : record ? undefined : 'invalid_key',
+  }
+}
+
+function isValidKey(key: string | null): boolean {
+  return !!key && API_KEYS.has(key)
+}
+
+const EXPLICIT_READ_ONLY_SCOPES = new Set([
+  'prooflink.verify_chain',
+  'prooflink.verify_receipt',
+  'prooflink.search_receipts',
+  'mission.list_incidents',
+  'mission.cluster_health',
+  'compliance.audit_summary',
+])
+
+function isReadOnlyScope(scope: string): boolean {
+  return scope.endsWith(':read') || EXPLICIT_READ_ONLY_SCOPES.has(scope)
+}
+
+function auditLog(event: string, fields: Record<string, unknown>): void {
+  const safe: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(fields)) {
+    if (/key|token|secret|password/i.test(k) && k !== 'key_prefix' && k !== 'key_provided') continue
+    safe[k] = v
+  }
+  console.error(JSON.stringify({
+    ts: new Date().toISOString(),
+    service: 'itechsmart-uaio-mcp',
+    event,
+    ...safe,
+  }))
 }
 
 // ─────────────────────────────────────────────
@@ -299,7 +422,7 @@ async function selfReport(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        service: 'itechsmart-mcp',
+        service: 'itechsmart-uaio-mcp',
         event,
         severity,
         details: {
@@ -458,6 +581,76 @@ const TOOLS = [
         container: { type: 'string', description: 'Optional: filter receipts by container name' },
       },
     },
+  },
+  {
+    name: 'prooflink.verify_chain',
+    description:
+      'Read-only audit scope: verify the ProofLink receipt chain for EU AI Act Article 12, CISO, and auditor workflows. '
+      + 'Alias for get_receipt_chain; safe for production API keys without admin rights.'
+      + scopeNote(TOOL_SCOPES['prooflink.verify_chain']),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Number of receipts to fetch (default: 20, max: 100)' },
+        container: { type: 'string', description: 'Optional: filter receipts by container name' },
+      },
+    },
+  },
+  {
+    name: 'prooflink.verify_receipt',
+    description:
+      'Read-only audit scope: verify one ProofLink receipt by ID without granting mutation rights. '
+      + 'Alias for verify_prooflink_receipt.'
+      + scopeNote(TOOL_SCOPES['prooflink.verify_receipt']),
+    inputSchema: {
+      type: 'object',
+      properties: { receipt_id: { type: 'string', description: 'The receipt ID to verify (16 hex characters)' } },
+      required: ['receipt_id'],
+    },
+  },
+  {
+    name: 'prooflink.search_receipts',
+    description:
+      'Read-only audit scope: search recent ProofLink receipts for ledger-backed post-hoc reconstruction. '
+      + 'Supports the same limit/container filters as get_receipt_chain.'
+      + scopeNote(TOOL_SCOPES['prooflink.search_receipts']),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Number of receipts to return (default: 20, max: 100)' },
+        container: { type: 'string', description: 'Optional: filter receipts by container name' },
+      },
+    },
+  },
+  {
+    name: 'mission.list_incidents',
+    description:
+      'Read-only mission scope: list recent autonomous IT incidents for audit and operations review. '
+      + 'Alias for list_recent_incidents.'
+      + scopeNote(TOOL_SCOPES['mission.list_incidents']),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Number of incidents to return (default: 10, max: 50)' },
+        since: { type: 'string', description: 'ISO 8601 datetime — only return incidents after this timestamp' },
+      },
+    },
+  },
+  {
+    name: 'mission.cluster_health',
+    description:
+      'Read-only mission scope: return live cluster health without granting execution or remediation rights. '
+      + 'Alias for cluster_status.'
+      + scopeNote(TOOL_SCOPES['mission.cluster_health']),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'compliance.audit_summary',
+    description:
+      'Read-only compliance scope: return the live compliance audit summary for CISO/auditor review. '
+      + 'Alias for get_compliance_status.'
+      + scopeNote(TOOL_SCOPES['compliance.audit_summary']),
+    inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'query_uaio_status',
@@ -1818,22 +2011,48 @@ async function authedCallTool(
   toolName: string,
   args: unknown,
 ): Promise<AuthedResult> {
-  const key = extractBearerKey(headers, query)
-  if (!isValidKey(key)) {
+  const auth = getAuthContext(headers, query)
+  const scope = TOOL_SCOPES[toolName]
+
+  if (!auth.ok) {
+    auditLog('mcp_call_rejected', {
+      tool: toolName || 'unknown',
+      reason: auth.reason,
+      key_provided: auth.keyProvided,
+      auth_source: auth.source,
+      cloudflare_access: auth.cloudflareAccess,
+    })
     void selfReport('WARN', 'mcp_invalid_auth', {
-      tool: toolName, key_provided: !!key,
+      tool: toolName, key_provided: auth.keyProvided, auth_source: auth.source, cloudflare_access: auth.cloudflareAccess,
     })
     return { status: 401, body: { error: 'invalid or missing API key' } }
   }
-  const scope = TOOL_SCOPES[toolName]
+
   if (!scope) {
+    auditLog('mcp_unknown_tool', {
+      tool: toolName, key_prefix: auth.keyPrefix, auth_source: auth.source, cloudflare_access: auth.cloudflareAccess,
+    })
     void selfReport('WARN', 'mcp_unknown_tool', {
-      tool: toolName, caller_key_prefix: keyPrefix(key!),
+      tool: toolName, caller_key_prefix: auth.keyPrefix,
     })
     return { status: 404, body: { error: 'unknown tool' } }
   }
-  const kp = keyPrefix(key!)
+
+  if (!isReadOnlyScope(scope) && !auth.admin) {
+    auditLog('mcp_mutation_blocked', {
+      tool: toolName, scope, key_prefix: auth.keyPrefix, auth_source: auth.source, cloudflare_access: auth.cloudflareAccess,
+    })
+    void selfReport('WARN', 'mcp_mutation_blocked', {
+      tool: toolName, scope, caller_key_prefix: auth.keyPrefix,
+    })
+    return { status: 403, body: { error: 'admin scope required for mutating tool' } }
+  }
+
+  const kp = auth.keyPrefix!
   if (!rateAllow(kp, toolName)) {
+    auditLog('mcp_rate_limit_exceeded', {
+      tool: toolName, scope, key_prefix: kp, auth_source: auth.source, cloudflare_access: auth.cloudflareAccess,
+    })
     void selfReport('WARN', 'mcp_rate_limit_exceeded', {
       tool: toolName, scope, caller_key_prefix: kp,
     })
@@ -1842,10 +2061,17 @@ async function authedCallTool(
       body: { error: 'rate limit exceeded', retry_after_seconds: 60 },
     }
   }
+
   const t0 = Date.now()
+  auditLog('mcp_call_started', {
+    tool: toolName, scope, key_prefix: kp, auth_source: auth.source, admin: auth.admin, cloudflare_access: auth.cloudflareAccess,
+  })
   try {
     const result = await dispatchTool(toolName, args)
     const duration_ms = Date.now() - t0
+    auditLog('mcp_call_success', {
+      tool: toolName, scope, key_prefix: kp, auth_source: auth.source, admin: auth.admin, duration_ms, cloudflare_access: auth.cloudflareAccess,
+    })
     void selfReport('INFO', 'mcp_tool_call', {
       tool: toolName, scope, caller_key_prefix: kp,
       result: 'success', duration_ms,
@@ -1854,6 +2080,9 @@ async function authedCallTool(
   } catch (e) {
     const duration_ms = Date.now() - t0
     console.error(`[mcp] tool '${toolName}' failed:`, e instanceof Error ? e.stack || e.message : String(e))
+    auditLog('mcp_call_error', {
+      tool: toolName, scope, key_prefix: kp, auth_source: auth.source, duration_ms, cloudflare_access: auth.cloudflareAccess,
+    })
     void selfReport('WARN', 'mcp_tool_error', {
       tool: toolName, scope, caller_key_prefix: kp,
       result: 'error', duration_ms,
@@ -2075,7 +2304,7 @@ async function startHttp() {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({
           status: 'ok',
-          service: 'itechsmart-mcp',
+          service: 'itechsmart-uaio-mcp',
           version: '2.2.0',
           phase: '1-secure-governance',
           transport: 'http+sse',
@@ -2278,7 +2507,7 @@ async function startHttp() {
     console.error('Endpoints: GET /health (open) | GET /sse (auth) | POST /messages (auth)')
     console.error('Phase 1 secure governance: auth + scopes + ProofLink + rate-limit + fail-closed')
     if (VALID_API_KEYS.size === 0) {
-      console.error('⚠️  NO API KEYS LOADED — set ITECHSMART_MCP_API_KEYS env to enable auth')
+      console.error('⚠️  NO API KEYS LOADED — set ITECHSMART_MCP_KEYS env to enable auth')
     } else {
       console.error(`Loaded ${VALID_API_KEYS.size} API key(s)`)
     }
@@ -2303,7 +2532,7 @@ Tools: 6 (verify_prooflink_receipt, get_receipt_chain, query_uaio_status,
             simulate_infrastructure_attack)
 
 Environment:
-  ITECHSMART_MCP_API_KEYS    Comma-separated API keys (required to call tools)
+  ITECHSMART_MCP_KEYS        Comma-separated API keys; append :admin for mutating tools\n  ITECHSMART_MCP_API_KEYS    Legacy comma-separated API keys (loaded as admin)
   MCP_RATE_LIMIT_PER_MIN     Default 60
   MCP_RATE_LIMIT_SIMULATE    Default 10
   SELF_REPORT_URL            ProofLink sink (default http://localhost:3202/agent/self-report)
