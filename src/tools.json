@@ -1663,6 +1663,128 @@
       }
     },
     {
+      "name": "get_learning_queue",
+      "display_name": "Learning Arbiter \u2014 Review Queue",
+      "description": "Get patterns pending human approval from the Learning Arbiter. These are Tier 2 items (score 50-85) that require human sign-off before promotion to the Mega Brain.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "AT-2",
+        "CA-7",
+        "SI-7"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "pending_count": {
+            "type": "integer"
+          },
+          "shadow_queue_count": {
+            "type": "integer"
+          },
+          "items": {
+            "type": "array"
+          },
+          "known_patterns": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
+      "name": "approve_learning_item",
+      "display_name": "Learning Arbiter \u2014 Approve Pattern",
+      "description": "Approve a Tier 2 learning pattern for promotion to Agent Brain + Weaviate. Provide the pattern_id from get_learning_queue.",
+      "required_scopes": [
+        "write"
+      ],
+      "tier": "governance",
+      "prooflink_receipt_generated": true,
+      "nist_controls": [
+        "AT-2",
+        "CA-7",
+        "SI-12"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "pattern_id": {
+            "type": "string",
+            "description": "Pattern ID from get_learning_queue (e.g. pat-abc123456789)"
+          }
+        },
+        "required": [
+          "pattern_id"
+        ]
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          },
+          "pattern_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "get_learning_metrics",
+      "display_name": "Learning Arbiter \u2014 Metrics",
+      "description": "Get Learning Arbiter cycle metrics: patterns processed, tier distribution, promotion counts, and known pattern library size.",
+      "required_scopes": [
+        "read"
+      ],
+      "tier": "read_only",
+      "prooflink_receipt_generated": false,
+      "nist_controls": [
+        "AU-6",
+        "CA-7",
+        "PM-6"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "last_run": {
+            "type": "string"
+          },
+          "total_processed": {
+            "type": "integer"
+          },
+          "total_promoted": {
+            "type": "integer"
+          },
+          "total_rejected": {
+            "type": "integer"
+          },
+          "known_patterns": {
+            "type": "integer"
+          },
+          "pending_review": {
+            "type": "integer"
+          },
+          "shadow_queue": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    {
       "name": "prooflink.verify_chain",
       "display_name": "ProofLink \u2014 Verify Chain",
       "description": "Read-only audit scope for verifying the ProofLink receipt chain. Alias of get_receipt_chain.",

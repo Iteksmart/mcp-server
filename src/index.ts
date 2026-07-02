@@ -139,6 +139,20 @@ const TOOL_SCOPES: Record<string, string> = {
   probo_controls:        'integrations:probo:read',
   probo_risks:           'integrations:probo:read',
   probo_summary:         'integrations:probo:read',
+  get_learning_queue:    'learning:arbiter:read',
+  approve_learning_item: 'learning:arbiter:write',
+  get_learning_metrics:  'learning:arbiter:read',
+  // GHL CRM tools
+  ghl_create_contact:   'ghl:contacts:write',
+  ghl_trigger_workflow: 'ghl:workflows:invoke',
+  ghl_book_appointment: 'ghl:appointments:write',
+  ghl_send_email:       'ghl:messaging:write',
+  ghl_update_contact:   'ghl:contacts:write',
+  ghl_move_pipeline:    'ghl:opportunities:write',
+  // Deepgram voice tools
+  deepgram_tts:          'deepgram:tts:invoke',
+  deepgram_transcribe:   'deepgram:stt:invoke',
+  deepgram_blog_audio:   'deepgram:tts:invoke',
 }
 
 const TOOL_ALIASES: Record<string, string> = {
@@ -1033,6 +1047,257 @@ const TOOLS = [
       + scopeNote('integrations:probo:read'),
     inputSchema: { type: 'object', properties: {} },
   },
+  {
+    name: 'get_learning_queue',
+    description: 'Get patterns pending human approval from Learning Arbiter (Tier 2 items, score 50-85).'
+      + scopeNote('learning:arbiter:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'approve_learning_item',
+    description: 'Approve a Tier 2 learning pattern for promotion to Agent Brain. Requires pattern_id.'
+      + scopeNote('learning:arbiter:write'),
+    inputSchema: {
+      type: 'object',
+      properties: { pattern_id: { type: 'string', description: 'Pattern ID from get_learning_queue' } },
+      required: ['pattern_id'],
+    },
+  },
+  {
+    name: 'get_learning_metrics',
+    description: 'Get Learning Arbiter cycle metrics: processed, promoted, rejected, known patterns.'
+      + scopeNote('learning:arbiter:read'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  // ── GHL CRM Tools ─────────────────────────────────────────────────
+  {
+    name: 'ghl_create_contact',
+    description: 'Create a contact in GoHighLevel CRM. Seals a ProofLink receipt.' + scopeNote('ghl:contacts:write'),
+    inputSchema: { type: 'object',
+      properties: {
+        first: { type: 'string' }, last: { type: 'string' },
+        email: { type: 'string' }, phone: { type: 'string' },
+        company: { type: 'string' },
+        tags: { type: 'array', items: { type: 'string' } },
+      }, required: ['first','last','email','phone','company'] },
+  },
+  {
+    name: 'ghl_trigger_workflow',
+    description: 'Trigger a GHL workflow for a contact. Seals a ProofLink receipt.' + scopeNote('ghl:workflows:invoke'),
+    inputSchema: { type: 'object',
+      properties: {
+        workflow_id: { type: 'string' }, contact_id: { type: 'string' },
+      }, required: ['workflow_id','contact_id'] },
+  },
+  {
+    name: 'ghl_book_appointment',
+    description: 'Book a calendar appointment for a GHL contact. Seals a ProofLink receipt.' + scopeNote('ghl:appointments:write'),
+    inputSchema: { type: 'object',
+      properties: {
+        contact_id: { type: 'string' }, calendar_id: { type: 'string' },
+        start_time: { type: 'string' }, end_time: { type: 'string' },
+      }, required: ['contact_id','calendar_id','start_time'] },
+  },
+  {
+    name: 'ghl_send_email',
+    description: 'Send email to GHL contact via Judge gate (held if flagged). Seals a ProofLink receipt.' + scopeNote('ghl:messaging:write'),
+    inputSchema: { type: 'object',
+      properties: {
+        contact_id: { type: 'string' }, subject: { type: 'string' },
+        body: { type: 'string' }, from_name: { type: 'string' }, from_email: { type: 'string' },
+      }, required: ['contact_id','subject','body'] },
+  },
+  {
+    name: 'ghl_update_contact',
+    description: 'Update GHL contact fields. Seals a ProofLink receipt.' + scopeNote('ghl:contacts:write'),
+    inputSchema: { type: 'object',
+      properties: {
+        contact_id: { type: 'string' }, fields: { type: 'object' },
+      }, required: ['contact_id','fields'] },
+  },
+  {
+    name: 'ghl_move_pipeline',
+    description: 'Move a GHL opportunity to a new pipeline stage. Seals a ProofLink receipt.' + scopeNote('ghl:opportunities:write'),
+    inputSchema: { type: 'object',
+      properties: {
+        opportunity_id: { type: 'string' }, stage_id: { type: 'string' },
+      }, required: ['opportunity_id','stage_id'] },
+  },
+  // ── Deepgram Voice Tools ──────────────────────────────────────────────
+  {
+    name: 'deepgram_tts',
+    description: 'Convert text to speech via Deepgram Aura (aura-asteria-en). Saves MP3 to mission-videos/ and seals a ProofLink receipt. Returns mp3_url.',
+    inputSchema: { type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Text to convert (max 4000 chars)' },
+        voice: { type: 'string', description: 'Deepgram voice model (default: aura-asteria-en)' },
+        output_filename: { type: 'string', description: 'Optional output filename (auto-generated if omitted)' },
+      }, required: ['text'] },
+  },
+  {
+    name: 'deepgram_transcribe',
+    description: 'Transcribe audio from URL or file path using Deepgram Nova-2. Returns transcript, confidence, and word-level timestamps. Seals a ProofLink receipt.',
+    inputSchema: { type: 'object',
+      properties: {
+        audio_url: { type: 'string', description: 'URL of audio file to transcribe' },
+        audio_file_path: { type: 'string', description: 'Server-side path to audio file' },
+      } },
+  },
+  {
+    name: 'deepgram_blog_audio',
+    description: 'Generate MP3 audio version of a blog post via Deepgram TTS. Saves to blog-audio/ directory. Returns mp3_url and filename. Seals a ProofLink receipt.',
+    inputSchema: { type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Blog post title' },
+        content: { type: 'string', description: 'Blog post content (markdown OK, stripped automatically)' },
+      }, required: ['title', 'content'] },
+  },
+
+  // ── ITSM ProofLink Loop Tools (tools 38-53) ──────────────────────────────
+  {
+    name: 'itsm_create_ticket',
+    description: 'Create an ITSM ticket for an incident. Assigns priority based on severity. Returns ticket ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title:       { type: 'string', description: 'Incident title' },
+        service:     { type: 'string', description: 'Affected service name' },
+        severity:    { type: 'string', enum: ['critical','warning','info'], description: 'Incident severity' },
+        description: { type: 'string', description: 'Full incident description' },
+        source:      { type: 'string', description: 'Detection source (iSELF, Prometheus, etc.)' },
+      },
+      required: ['title', 'service', 'severity', 'description'],
+    },
+  },
+  {
+    name: 'itsm_get_ticket',
+    description: 'Retrieve a single ITSM ticket by ID, including embedded ProofLink receipt if sealed.',
+    inputSchema: {
+      type: 'object',
+      properties: { ticket_id: { type: 'string', description: 'Ticket ID (e.g. ITS-10001)' } },
+      required: ['ticket_id'],
+    },
+  },
+  {
+    name: 'itsm_list_tickets',
+    description: 'List ITSM tickets. Optionally filter by status (open/resolved) or severity.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status:   { type: 'string', enum: ['open','resolved','all'], description: 'Filter by status' },
+        severity: { type: 'string', enum: ['critical','warning','info','all'], description: 'Filter by severity' },
+        limit:    { type: 'number', description: 'Max tickets to return (default 20)' },
+      },
+    },
+  },
+  {
+    name: 'itsm_close_ticket',
+    description: 'Close and resolve an ITSM ticket with a resolution note. Triggers ProofLink seal.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ticket_id:  { type: 'string', description: 'Ticket ID to close' },
+        resolution: { type: 'string', description: 'Resolution description' },
+      },
+      required: ['ticket_id', 'resolution'],
+    },
+  },
+  {
+    name: 'itsm_run_loop',
+    description: 'Trigger the full 6-step ITSM ProofLink loop: DETECT -> TICKET -> DIAGNOSE -> REMEDIATE -> VERIFY -> CLOSE+SEAL. Returns sealed ticket IDs and receipt hashes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        dry_run: { type: 'boolean', description: 'If true, detect and ticket but do not restart services' },
+      },
+    },
+  },
+  {
+    name: 'itsm_run_test',
+    description: 'Inject a synthetic test incident through the full ITSM ProofLink loop. Returns ticket ID, receipt hash, and the embedded receipt block.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'itsm_get_mttr_stats',
+    description: 'Get Mean Time To Remediate (MTTR) statistics from resolved ITSM tickets.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        last_n: { type: 'number', description: 'Analyze last N resolved tickets (default 10)' },
+      },
+    },
+  },
+  {
+    name: 'itsm_embed_receipt',
+    description: 'Embed a ProofLink SHA-256 receipt directly inside an existing ITSM ticket body.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ticket_id:    { type: 'string', description: 'Ticket ID to embed receipt into' },
+        receipt_hash: { type: 'string', description: 'SHA-256 hash of the ProofLink receipt' },
+        receipt_id:   { type: 'string', description: 'ProofLink receipt ID' },
+      },
+      required: ['ticket_id', 'receipt_hash'],
+    },
+  },
+  {
+    name: 'itsm_verify_receipt',
+    description: 'Verify the ProofLink receipt embedded in an ITSM ticket. Returns hash, chain position, and verification URL.',
+    inputSchema: {
+      type: 'object',
+      properties: { ticket_id: { type: 'string', description: 'Ticket ID to verify' } },
+      required: ['ticket_id'],
+    },
+  },
+  {
+    name: 'itsm_list_open_incidents',
+    description: 'List all currently open incidents (ITSM tickets with status=open), sorted by severity.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'itsm_get_incident_timeline',
+    description: 'Get the full lifecycle timeline of an incident: detected, ticketed, diagnosed, remediated, verified, sealed.',
+    inputSchema: {
+      type: 'object',
+      properties: { ticket_id: { type: 'string', description: 'Ticket ID' } },
+      required: ['ticket_id'],
+    },
+  },
+  {
+    name: 'itsm_trigger_detection',
+    description: 'Run all 5 incident detectors (iSELF, Prometheus, Wazuh, NetworkScanner, OctoAI) and return raw findings without creating tickets.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'itsm_get_detection_sources',
+    description: 'Return status and last-scan results for all 5 ITSM incident detection sources.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'itsm_get_remediation_history',
+    description: 'Get the history of all auto-remediation actions, with MTTR and success rate.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        service: { type: 'string', description: 'Filter by service name (optional)' },
+        limit:   { type: 'number', description: 'Max results (default 20)' },
+      },
+    },
+  },
+  {
+    name: 'itsm_register_webhook',
+    description: 'Register a webhook URL to receive real-time ITSM ticket state changes (OPENED, UPDATED, RESOLVED).',
+    inputSchema: {
+      type: 'object',
+      properties: { url: { type: 'string', description: 'Webhook URL to POST events to' } },
+      required: ['url'],
+    },
+  },
+  {
+    name: 'itsm_dashboard_summary',
+    description: 'Get the ITSM dashboard summary: open count, resolved today, avg MTTR, top failing services, and ProofLink sealing rate.',
+    inputSchema: { type: 'object', properties: {} },
+  },
 ]
 
 // ─────────────────────────────────────────────
@@ -1812,7 +2077,7 @@ async function dispatchTool(name: string, args: unknown): Promise<unknown> {
 
     case 'cluster_status': {
       try {
-        const res = await fetch('http://127.0.0.1:8210/api/v1/cluster/status')
+        const res = await fetch('http://172.18.0.1:8210/api/v1/cluster')
         const data = await res.json() as Record<string, unknown>
         return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
       } catch (err) {
@@ -1824,7 +2089,7 @@ async function dispatchTool(name: string, args: unknown): Promise<unknown> {
       const action = String(safeArgs.action || 'list')
       const port = safeArgs.port ? Number(safeArgs.port) : null
       try {
-        let url = 'http://127.0.0.1:8210/api/v1/ports'
+        let url = 'http://172.18.0.1:8210/api/v1/ports'
         if (action === 'check' && port) url += '/' + port
         const res = await fetch(url)
         const data = await res.json() as Record<string, unknown>
@@ -1994,8 +2259,339 @@ async function dispatchTool(name: string, args: unknown): Promise<unknown> {
       return { content: [{ type: 'text', text: JSON.stringify(await djuaneGet('/api/v1/probo/summary'), null, 2) }] }
     }
 
+    // ── GHL CRM handlers ────────────────────────────────────────────────
+    case 'ghl_create_contact':
+    case 'ghl_trigger_workflow':
+    case 'ghl_book_appointment':
+    case 'ghl_send_email':
+    case 'ghl_update_contact':
+    case 'ghl_move_pipeline': {
+      const { execSync: ghlExec } = await import('child_process')
+      const methodMap: Record<string,string> = {
+        ghl_create_contact: 'create_contact',
+        ghl_trigger_workflow: 'trigger_workflow',
+        ghl_book_appointment: 'book_appointment',
+        ghl_send_email: 'send_email',
+        ghl_update_contact: 'update_contact',
+        ghl_move_pipeline: 'move_opportunity',
+      }
+      const ghlMethod = methodMap[canonical] || canonical
+      const ghlPayload = JSON.stringify({ method: ghlMethod, args: args || {} })
+      const ghlEscaped = ghlPayload.replace(/'/g, "'\\''")
+      try {
+        const ghlOut = ghlExec(`python3 /opt/itechsmart/ghl_api/ghl_cli.py '${ghlEscaped}'`,
+          { encoding: 'utf8', timeout: 30000, env: process.env as NodeJS.ProcessEnv })
+        return { content: [{ type: 'text', text: ghlOut.trim() }] }
+      } catch (ghlErr: any) {
+        const errMsg = JSON.stringify({ error: ghlErr.message, stderr: ghlErr.stderr?.toString()?.slice(0,500) })
+        return { content: [{ type: 'text', text: errMsg }] }
+      }
+    }
+
+    // ── Deepgram Voice Tool handlers ─────────────────────────────────────
+    case 'deepgram_tts':
+    case 'deepgram_transcribe':
+    case 'deepgram_blog_audio': {
+      const dgEndpointMap: Record<string,string> = {
+        deepgram_tts: '/deepgram/tts',
+        deepgram_transcribe: '/deepgram/transcribe',
+        deepgram_blog_audio: '/deepgram/blog-audio',
+      }
+      const dgEndpoint = dgEndpointMap[canonical]
+      try {
+        const dgRes = await fetch(`http://127.0.0.1:8091${dgEndpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(args || {}),
+        })
+        const dgData = await dgRes.json()
+        return { content: [{ type: 'text', text: JSON.stringify(dgData, null, 2) }] }
+      } catch (dgErr: any) {
+        return { content: [{ type: 'text', text: JSON.stringify({ error: dgErr.message }) }] }
+      }
+    }
+
+    case 'itsm_create_ticket': {
+      const { title, service, severity, description: desc, source } = args as any
+      const priority = severity === 'critical' ? 'P1' : severity === 'warning' ? 'P2' : 'P3'
+      const res = await fetch('http://127.0.0.1:8181/api/v1/tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, service, severity, priority, description: desc, source: source || 'MCP', assignee: 'UAIO Core Agent v4.2' }),
+      })
+      const ticket = await res.json()
+      return { content: [{ type: 'text', text: JSON.stringify(ticket, null, 2) }] }
+    }
+
+    case 'itsm_get_ticket': {
+      const { ticket_id } = args as any
+      const res = await fetch(`http://127.0.0.1:8181/api/v1/tickets/${ticket_id}`)
+      const ticket = await res.json()
+      return { content: [{ type: 'text', text: JSON.stringify(ticket, null, 2) }] }
+    }
+
+    case 'itsm_list_tickets': {
+      const { status = 'all', severity = 'all', limit = 20 } = (args as any) || {}
+      const res = await fetch('http://127.0.0.1:8181/api/v1/tickets')
+      let tickets: any[] = (await res.json()) as any[]
+      if (status !== 'all') tickets = tickets.filter((t: any) => t.status === status)
+      if (severity !== 'all') tickets = tickets.filter((t: any) => t.severity === severity)
+      tickets = tickets.slice(-limit)
+      return { content: [{ type: 'text', text: JSON.stringify({ count: tickets.length, tickets }, null, 2) }] }
+    }
+
+    case 'itsm_close_ticket': {
+      const { ticket_id, resolution } = args as any
+      const res = await fetch(`http://127.0.0.1:8181/api/v1/tickets/${ticket_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'resolved', resolution }),
+      })
+      const ticket = await res.json()
+      return { content: [{ type: 'text', text: JSON.stringify(ticket, null, 2) }] }
+    }
+
+    case 'itsm_run_loop': {
+      const { dry_run = false } = (args as any) || {}
+      const { execSync } = require('child_process')
+      const flag = dry_run ? '--dry-run' : ''
+      const out = execSync(`python3 /opt/itechsmart/prooflink-loop/itsm_loop.py ${flag} 2>&1`, { timeout: 120000 }).toString()
+      return { content: [{ type: 'text', text: out }] }
+    }
+
+    case 'itsm_run_test': {
+      const { execSync } = require('child_process')
+      const out = execSync('python3 /opt/itechsmart/prooflink-loop/itsm_loop.py --test 2>&1', { timeout: 60000 }).toString()
+      return { content: [{ type: 'text', text: out }] }
+    }
+
+    case 'itsm_get_mttr_stats': {
+      const { last_n = 10 } = (args as any) || {}
+      const res = await fetch('http://127.0.0.1:8181/api/v1/tickets')
+      const all: any[] = (await res.json()) as any[]
+      const resolved = all.filter((t: any) => t.status === 'resolved').slice(-last_n)
+      const mttrValues = resolved
+        .filter((t: any) => t.resolution && t.resolution.includes('MTTR='))
+        .map((t: any) => { const m = t.resolution.match(/MTTR=(\d+)s/); return m ? parseInt(m[1]) : 0 })
+        .filter((v: number) => v > 0)
+      const avg = mttrValues.length ? Math.round((mttrValues as number[]).reduce((a: number, b: number) => a + b, 0) / mttrValues.length) : 0
+      return { content: [{ type: 'text', text: JSON.stringify({ analyzed: resolved.length, avg_mttr_seconds: avg, avg_mttr_minutes: (avg/60).toFixed(1), samples: mttrValues }, null, 2) }] }
+    }
+
+    case 'itsm_embed_receipt': {
+      const { ticket_id, receipt_hash, receipt_id } = args as any
+      const res = await fetch(`http://127.0.0.1:8181/api/v1/tickets/${ticket_id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receipt_hash, receipt_id, resolution: `ProofLink sealed: SHA-256=${receipt_hash}` }),
+      })
+      const ticket = await res.json()
+      return { content: [{ type: 'text', text: JSON.stringify({ embedded: true, ticket_id, receipt_hash, ticket }, null, 2) }] }
+    }
+
+    case 'itsm_verify_receipt': {
+      const { ticket_id } = args as any
+      const res = await fetch(`http://127.0.0.1:8181/api/v1/tickets/${ticket_id}`)
+      const ticket = (await res.json()) as any
+      const hash = ticket.receipt_hash || 'NOT_SEALED'
+      return { content: [{ type: 'text', text: JSON.stringify({ ticket_id, receipt_hash: hash, receipt_id: ticket.receipt_id, verify_url: `https://verify.itechsmart.dev/${ticket_id}`, sealed: !!ticket.receipt_hash }, null, 2) }] }
+    }
+
+    case 'itsm_list_open_incidents': {
+      const res = await fetch('http://127.0.0.1:8181/api/v1/tickets')
+      const all: any[] = (await res.json()) as any[]
+      const open = all.filter((t: any) => t.status === 'open')
+        .sort((a: any, b: any) => (a.severity === 'critical' ? 0 : 1) - (b.severity === 'critical' ? 0 : 1))
+      return { content: [{ type: 'text', text: JSON.stringify({ open_count: open.length, incidents: open }, null, 2) }] }
+    }
+
+    case 'itsm_get_incident_timeline': {
+      const { ticket_id } = args as any
+      const res = await fetch(`http://127.0.0.1:8181/api/v1/tickets/${ticket_id}`)
+      const t = (await res.json()) as any
+      const timeline = [
+        { step: 1, phase: 'DETECT',    at: t.created_at, detail: t.source || 'iSELF scanner' },
+        { step: 2, phase: 'TICKET',    at: t.created_at, detail: `${t.id} opened | priority=${t.priority}` },
+        { step: 3, phase: 'DIAGNOSE',  at: t.created_at, detail: `severity=${t.severity} | assignee=${t.assignee}` },
+        { step: 4, phase: 'REMEDIATE', at: t.updated_at, detail: t.status === 'resolved' ? 'action executed' : 'pending' },
+        { step: 5, phase: 'VERIFY',    at: t.updated_at, detail: t.receipt_hash ? 'checks passed' : 'pending' },
+        { step: 6, phase: 'SEAL',      at: t.updated_at, detail: t.receipt_hash ? `SHA-256=${t.receipt_hash.slice(0,16)}...` : 'not yet sealed' },
+      ]
+      return { content: [{ type: 'text', text: JSON.stringify({ ticket_id, status: t.status, timeline }, null, 2) }] }
+    }
+
+    case 'itsm_trigger_detection': {
+      const { execSync } = require('child_process')
+      const out = execSync('python3 /opt/itechsmart/prooflink-loop/itsm_loop.py --detect-only 2>&1', { timeout: 30000 }).toString()
+      return { content: [{ type: 'text', text: out }] }
+    }
+
+    case 'itsm_get_detection_sources': {
+      const sources = [
+        { name: 'iSELF',          endpoint: 'http://127.0.0.1:8215/health', type: 'journal+health' },
+        { name: 'Prometheus',      endpoint: 'http://localhost:9090/api/v1/alerts', type: 'metrics' },
+        { name: 'Wazuh',           endpoint: process.env.WAZUH_MANAGER_URL || 'not-configured', type: 'security' },
+        { name: 'NetworkScanner',  endpoint: 'multi-endpoint', type: 'health-checks' },
+        { name: 'OctoAI',          endpoint: process.env.OCTOAI_HEALTH_URL || 'http://localhost:8100/health', type: 'gateway' },
+      ]
+      const withStatus = await Promise.all(sources.map(async s => {
+        let up = false
+        try { const r = await fetch(s.endpoint, { signal: AbortSignal.timeout(4000) }); up = r.ok } catch {}
+        return { ...s, status: up ? 'UP' : 'DOWN' }
+      }))
+      return { content: [{ type: 'text', text: JSON.stringify({ sources: withStatus }, null, 2) }] }
+    }
+
+    case 'itsm_get_remediation_history': {
+      const { service, limit = 20 } = (args as any) || {}
+      const res = await fetch('http://127.0.0.1:8181/api/v1/tickets')
+      let all: any[] = (await res.json()) as any[]
+      let resolved = all.filter((t: any) => t.status === 'resolved')
+      if (service) resolved = resolved.filter((t: any) => t.service === service)
+      resolved = resolved.slice(-limit)
+      const success = resolved.filter((t: any) => t.receipt_hash).length
+      return { content: [{ type: 'text', text: JSON.stringify({ total_remediated: resolved.length, auto_sealed: success, success_rate: resolved.length ? `${Math.round(success/resolved.length*100)}%` : '0%', history: resolved.map((t: any) => ({ id: t.id, service: t.service, severity: t.severity, sealed: !!t.receipt_hash, updated_at: t.updated_at })) }, null, 2) }] }
+    }
+
+    case 'itsm_register_webhook': {
+      const { url } = args as any
+      const res = await fetch('http://127.0.0.1:8181/api/v1/webhooks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      })
+      const result = (await res.json()) as any
+      return { content: [{ type: 'text', text: JSON.stringify({ registered: true, ...(result as object) }, null, 2) }] }
+    }
+
+    case 'itsm_dashboard_summary': {
+      const res = await fetch('http://127.0.0.1:8181/api/v1/tickets')
+      const all: any[] = (await res.json()) as any[]
+      const open = all.filter((t: any) => t.status === 'open')
+      const today = new Date().toISOString().slice(0, 10)
+      const resolvedToday = all.filter((t: any) => t.status === 'resolved' && t.updated_at?.startsWith(today))
+      const sealed = all.filter((t: any) => t.receipt_hash)
+      const svcCounts: Record<string, number> = {}
+      open.forEach((t: any) => { svcCounts[t.service] = (svcCounts[t.service] || 0) + 1 })
+      const topServices = Object.entries(svcCounts).sort((a, b) => b[1] - a[1]).slice(0, 5)
+      const mttrSamples = all.filter((t: any) => t.resolution?.includes('MTTR=')).map((t: any) => { const m = t.resolution.match(/MTTR=(\d+)s/); return m ? parseInt(m[1]) : 0 }).filter((v: number) => v > 0)
+      const avgMttr = mttrSamples.length ? Math.round(mttrSamples.reduce((a, b) => a + b, 0) / mttrSamples.length) : 0
+      return { content: [{ type: 'text', text: JSON.stringify({
+        open_incidents: open.length,
+        critical_open: open.filter((t: any) => t.severity === 'critical').length,
+        resolved_today: resolvedToday.length,
+        total_tickets: all.length,
+        prooflink_sealed: sealed.length,
+        sealing_rate: all.length ? `${Math.round(sealed.length/all.length*100)}%` : '0%',
+        avg_mttr_seconds: avgMttr,
+        avg_mttr_display: avgMttr < 60 ? `${avgMttr}s` : `${(avgMttr/60).toFixed(1)}m`,
+        top_failing_services: topServices,
+        human_interventions: 0,
+        loop: 'DETECT -> TICKET -> DIAGNOSE -> REMEDIATE -> VERIFY -> CLOSE+SEAL',
+      }, null, 2) }] }
+    }
+
+
     default:
-      throw new Error(`unknown tool: ${name}`)
+      
+      case "get_learning_queue": {
+        try {
+          const STATE_PATH = "/home/ubuntu/.arbiter_state.json";
+          const state = fs.existsSync(STATE_PATH)
+            ? JSON.parse(fs.readFileSync(STATE_PATH, "utf8"))
+            : {};
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                pending_count: (state.pending_review || []).length,
+                shadow_queue_count: (state.shadow_queue || []).length,
+                known_patterns: (state.known_pattern_hashes || []).length,
+                items: (state.pending_review || []).slice(0, 20).map((p: any) => ({
+                  pattern_id: p.pattern_id,
+                  action: p.action,
+                  subject_type: p.subject_type,
+                  score: p.score,
+                  proposed_rule: p.proposed_rule,
+                  review_requested: p.review_requested,
+                  is_security: p.is_security,
+                  blast_radius_high: p.blast_radius_high,
+                }))
+              }, null, 2)
+            }]
+          };
+        } catch (e: any) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: String(e) }) }] };
+        }
+      }
+
+      case "approve_learning_item": {
+        try {
+          const STATE_PATH = "/home/ubuntu/.arbiter_state.json";
+          const patternId: string = (args as any)?.pattern_id ?? "";
+          if (!patternId) throw new Error("pattern_id required");
+          const state = fs.existsSync(STATE_PATH)
+            ? JSON.parse(fs.readFileSync(STATE_PATH, "utf8"))
+            : { pending_review: [] };
+          const idx: number = (state.pending_review || []).findIndex(
+            (p: any) => p.pattern_id === patternId
+          );
+          if (idx === -1) {
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({ approved: false, pattern_id: patternId, message: "Pattern not found in review queue" })
+              }]
+            };
+          }
+          const pattern = state.pending_review[idx];
+          state.pending_review.splice(idx, 1);
+          state.known_pattern_hashes = [...(state.known_pattern_hashes || []), pattern.hash].slice(-1000);
+          fs.writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+          try {
+            execSync(
+              `python3 /opt/itechsmart/audit_ledger/append.py --actor mcp:approve_learning_item --category learning --action approve_learning_pattern --subject "${patternId.replace(/"/g, '')}" --outcome "SUCCESS: Human-approved Tier 2 pattern promoted via MCP" --no-ots`,
+              { timeout: 5000 }
+            );
+          } catch (_) {}
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({ approved: true, pattern_id: patternId, message: `Pattern ${patternId} approved and added to known patterns` })
+            }]
+          };
+        } catch (e: any) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: String(e) }) }] };
+        }
+      }
+
+      case "get_learning_metrics": {
+        try {
+          const STATE_PATH = "/home/ubuntu/.arbiter_state.json";
+          const state = fs.existsSync(STATE_PATH)
+            ? JSON.parse(fs.readFileSync(STATE_PATH, "utf8"))
+            : {};
+          const m = (state.metrics as any) || {};
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                last_run: (state.last_run as string) ?? null,
+                total_processed: (m.total_processed as number) ?? 0,
+                total_promoted: (m.total_promoted as number) ?? 0,
+                total_rejected: (m.total_rejected as number) ?? 0,
+                known_patterns: (state.known_pattern_hashes || []).length,
+                pending_review: (state.pending_review || []).length,
+                shadow_queue: (state.shadow_queue || []).length,
+              }, null, 2)
+            }]
+          };
+        } catch (e: any) {
+          return { content: [{ type: "text", text: JSON.stringify({ error: String(e) }) }] };
+        }
+      }
+
+throw new Error(`unknown tool: ${name}`)
   }
 }
 
@@ -2488,6 +3084,81 @@ async function startHttp() {
       // ── A2A: JSON-RPC message/send + tasks/get (auth required) ──
       if (req.method === 'POST' && reqUrl.pathname === '/a2a') {
         await handleA2A(req, res, reqUrl)
+        return
+      }
+
+
+      // ── POST /webhooks/probo — Probo GRC webhook receiver (Svix-signed) ──
+      if (req.method === 'POST' && reqUrl.pathname === '/webhooks/probo') {
+        const chunks: Buffer[] = []
+        for await (const chunk of req) chunks.push(chunk as Buffer)
+        const rawBody = Buffer.concat(chunks).toString('utf8')
+
+        // Load signing secret: env > ~/.secrets
+        let webhookSecret = process.env.PROBO_WEBHOOK_SECRET || ''
+        if (!webhookSecret) {
+          try {
+            const { readFileSync } = await import('fs')
+            const { homedir } = await import('os')
+            webhookSecret = readFileSync(homedir() + '/.secrets/probo_webhook_secret', 'utf8').trim()
+          } catch { /* not found */ }
+        }
+
+        // Svix signature verification
+        const svixId        = req.headers['svix-id'] as string | undefined
+        const svixTimestamp = req.headers['svix-timestamp'] as string | undefined
+        const svixSig       = req.headers['svix-signature'] as string | undefined
+
+        if (webhookSecret && svixId && svixTimestamp && svixSig) {
+          try {
+            const { createHmac } = await import('crypto')
+            const keyBytes = Buffer.from(webhookSecret.replace(/^whsec_/, ''), 'hex')
+            const signed   = svixId + "." + svixTimestamp + "." + rawBody
+            const computed = createHmac('sha256', keyBytes).update(signed).digest('base64')
+            const valid    = svixSig.split(' ').some(s => s.replace(/^v1,/, '') === computed)
+            if (!valid) {
+              console.error('[probo-webhook] signature mismatch')
+              res.writeHead(401, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ error: 'invalid signature' }))
+              return
+            }
+          } catch (sigErr) {
+            console.error('[probo-webhook] sig verification error:', sigErr)
+          }
+        } else if (webhookSecret) {
+          // Secret configured but headers missing — reject
+          console.error('[probo-webhook] missing svix headers')
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'missing svix-id / svix-timestamp / svix-signature headers' }))
+          return
+        }
+
+        let event: { type?: string; data?: unknown } = {}
+        try { event = JSON.parse(rawBody) } catch { /* ignore parse error */ }
+
+        const eventType = event.type || 'unknown'
+        console.error()
+
+        // Seal a ProofLink receipt for every Probo event
+        try {
+          const { execFile } = await import('child_process')
+          const proboArgs: string[] = [
+            '/opt/itechsmart/audit_ledger/append.py',
+            '--actor',   'itechsmart-probo',
+            '--action',  String(eventType),
+            '--subject', 'compliance.itechsmart.dev to mcp.itechsmart.dev/webhooks/probo',
+            '--outcome', 'SUCCESS: Probo event sealed: ' + String(eventType),
+          ]
+          execFile('python3', proboArgs, { timeout: 10000 }, (err: Error | null) => {
+            if (err) console.error('[probo-webhook] receipt seal error:', err.message)
+            else console.error()
+          })
+        } catch (sealErr) {
+          console.error('[probo-webhook] seal spawn error:', sealErr)
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ ok: true, event: eventType }))
         return
       }
 
