@@ -1,0 +1,51 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.iteksmart/mcp-server",
+  "title": "iTechSmart UAIO",
+  "description": "Connect AI agents to iTechSmart UAIO, ProofLink verification, and autonomous IT operations.",
+  "repository": {
+    "url": "https://github.com/Iteksmart/mcp-server",
+    "source": "github"
+  },
+  "version": "2.0.1",
+  "remotes": [
+    {
+      "type": "sse",
+      "url": "https://mcp.itechsmart.dev/sse",
+      "headers": [
+        {
+          "name": "x-itechsmart-mcp-key",
+          "description": "iTechSmart MCP access key",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@itechsmart/mcp-server",
+      "version": "2.0.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "ITECHSMART_API_KEY",
+          "description": "iTechSmart API key for UAIO and ProofLink platform access",
+          "isRequired": true,
+          "format": "string",
+          "isSecret": true
+        },
+        {
+          "name": "ITECHSMART_API_URL",
+          "description": "Optional iTechSmart API base URL override",
+          "isRequired": false,
+          "format": "string",
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
