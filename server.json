@@ -1,13 +1,13 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.iteksmart/mcp-server",
+  "name": "io.github.Iteksmart/mcp-server",
   "title": "iTechSmart UAIO",
   "description": "Connect AI agents to iTechSmart UAIO, ProofLink verification, and autonomous IT operations.",
   "repository": {
     "url": "https://github.com/Iteksmart/mcp-server",
     "source": "github"
   },
-  "version": "2.0.1",
+  "version": "2.0.2",
   "remotes": [
     {
       "type": "sse",
@@ -26,7 +26,7 @@
     {
       "registryType": "npm",
       "identifier": "@itechsmart/mcp-server",
-      "version": "2.0.1",
+      "version": "2.0.2",
       "transport": {
         "type": "stdio"
       },
