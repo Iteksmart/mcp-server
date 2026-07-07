@@ -1300,6 +1300,35 @@ const TOOLS = [
   },
 ]
 
+function buildMcpServerCard(baseUrl: string) {
+  return {
+    serverInfo: {
+      name: 'iTechSmart ProofLink MCP Server',
+      version: '2.2.0',
+    },
+    authentication: {
+      required: true,
+      schemes: ['apiKey'],
+      parameters: [
+        {
+          name: 'x-itechsmart-mcp-key',
+          in: 'header',
+          description: 'iTechSmart MCP access key for ProofLink and UAIO API access.',
+          required: true,
+        },
+      ],
+    },
+    transport: {
+      type: 'sse',
+      url: `${baseUrl}/sse`,
+      messagesUrl: `${baseUrl}/messages`,
+    },
+    tools: TOOLS,
+    resources: [],
+    prompts: [],
+  }
+}
+
 // ─────────────────────────────────────────────
 // TOOL DISPATCH (callable from both SSE handler and stateless POST)
 // ─────────────────────────────────────────────
@@ -2963,6 +2992,18 @@ async function startHttp() {
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ error: 'tools.json unreadable', detail: String(e) }))
         }
+        return
+      }
+
+      // ── Smithery static server card — public metadata for auth-gated scans ──
+      if (req.method === 'GET' && reqUrl.pathname === '/.well-known/mcp/server-card.json') {
+        const base = `https://${req.headers.host || 'mcp.itechsmart.dev'}`
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'public, max-age=300',
+          'Access-Control-Allow-Origin': '*',
+        })
+        res.end(JSON.stringify(buildMcpServerCard(base)))
         return
       }
 
