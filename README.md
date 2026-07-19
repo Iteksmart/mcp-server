@@ -1,3 +1,7 @@
+> [!WARNING]
+> **This repository has moved to [github.com/iTechSmartINC/mcp-server](https://github.com/iTechSmartINC/mcp-server)** as part of the iTechSmart Inc rebrand.
+> Please update your links and git remotes. This copy is kept as a redirect and is no longer updated.
+
 # iTechSmart MCP Server
 
 **Connect any AI agent to UAIO — Autonomous IT Operations + ProofLink™ Verification**
